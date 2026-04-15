@@ -970,16 +970,19 @@ const commentsRuns = (safePlan?.runs || []).map((run) => {
             
             try {
               const activeLinks = new Set(
-                orders
-                  .filter((order) => {
-                    const now = Date.now();
-                    const runs = order.runs || [];
-                    if (!runs.length) return false;
-                    const allRunsCompleted = runs.every((run) => new Date(run.at).getTime() <= now);
-                    return !allRunsCompleted && order.status !== "cancelled";
-                  })
-                  .map((order) => order.link.replace(/\/+$/, "").toLowerCase())
-              );
+  orders
+    .filter((order) => {
+      const now = Date.now();
+      const runs = order.runs || [];
+      if (!runs.length) return false;
+      const allRunsCompleted = runs.every((run) => new Date(run.at).getTime() <= now);
+      return !allRunsCompleted && 
+        order.status !== "cancelled" && 
+        order.status !== "failed" && 
+        order.status !== "completed";
+    })
+    .map((order) => order.link.replace(/\/+$/, "").toLowerCase())
+);
               const createdLinks = new Set<string>();
               let successCount = 0;
               let failedCount = 0;
