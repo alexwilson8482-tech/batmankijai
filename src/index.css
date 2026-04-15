@@ -1,0 +1,638 @@
+@import "tailwindcss";
+
+/* ========================================== */
+/* 🦇 BATMAN / GOTHAM THEME - GLOBAL STYLES  */
+/* ========================================== */
+
+:root {
+  color-scheme: dark;
+  
+  /* Batman Color Palette */
+  --bat-yellow: #eab308;
+  --bat-gold: #facc15;
+  --bat-amber: #f59e0b;
+  --bat-black: #000000;
+  --bat-dark: #0a0a0a;
+  --bat-gray-900: #111111;
+  --bat-gray-800: #1a1a1a;
+  --bat-gray-700: #2a2a2a;
+  --bat-gray-600: #3a3a3a;
+  --bat-gray-500: #6b7280;
+  --bat-gray-400: #9ca3af;
+}
+
+/* ========================================== */
+/* BASE BODY STYLES                           */
+/* ========================================== */
+
+body {
+  margin: 0;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  background: #000000;
+  color: #e5e7eb;
+  min-height: 100vh;
+  
+  /* Subtle Gotham atmosphere */
+  background-image: 
+    radial-gradient(ellipse at top, rgba(234, 179, 8, 0.015) 0%, transparent 50%),
+    radial-gradient(ellipse at bottom right, rgba(234, 179, 8, 0.01) 0%, transparent 40%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ========================================== */
+/* 🦇 BATMAN SCROLLBAR                        */
+/* ========================================== */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #000000;
+  border-left: 1px solid rgba(234, 179, 8, 0.1);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #eab308 0%, #ca8a04 100%);
+  border-radius: 9999px;
+  border: 2px solid #000000;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #facc15 0%, #eab308 100%);
+}
+
+::-webkit-scrollbar-corner {
+  background: #000000;
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #eab308 #000000;
+}
+
+/* ========================================== */
+/* TEXT SELECTION                             */
+/* ========================================== */
+
+::selection {
+  background-color: rgba(234, 179, 8, 0.3);
+  color: #facc15;
+}
+
+::-moz-selection {
+  background-color: rgba(234, 179, 8, 0.3);
+  color: #facc15;
+}
+
+/* ========================================== */
+/* 🦇 GLOWING EFFECTS                         */
+/* ========================================== */
+
+/* Yellow glow on hover */
+.bat-glow {
+  transition: all 0.3s ease;
+}
+
+.bat-glow:hover {
+  box-shadow: 
+    0 0 20px rgba(234, 179, 8, 0.3),
+    0 0 40px rgba(234, 179, 8, 0.15),
+    0 0 60px rgba(234, 179, 8, 0.05);
+  border-color: rgba(234, 179, 8, 0.5) !important;
+}
+
+/* Text glow effect */
+.bat-text-glow {
+  text-shadow: 
+    0 0 10px rgba(234, 179, 8, 0.5),
+    0 0 20px rgba(234, 179, 8, 0.3),
+    0 0 30px rgba(234, 179, 8, 0.2);
+}
+
+/* Card hover glow */
+.bat-card {
+  transition: all 0.3s ease;
+}
+
+.bat-card:hover {
+  box-shadow: 0 0 30px rgba(234, 179, 8, 0.1);
+  border-color: rgba(234, 179, 8, 0.4) !important;
+  transform: translateY(-2px);
+}
+
+/* Intense glow for important elements */
+.bat-glow-intense {
+  box-shadow: 
+    0 0 10px rgba(234, 179, 8, 0.4),
+    0 0 20px rgba(234, 179, 8, 0.2),
+    inset 0 0 10px rgba(234, 179, 8, 0.1);
+}
+
+/* ========================================== */
+/* 🦇 BATMAN ANIMATIONS                       */
+/* ========================================== */
+
+/* Bat pulse animation */
+@keyframes bat-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.05);
+  }
+}
+
+/* Floating animation */
+@keyframes bat-float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+/* Bat signal animation */
+@keyframes bat-signal {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(0.95);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Glow pulse animation */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(234, 179, 8, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(234, 179, 8, 0.5), 0 0 30px rgba(234, 179, 8, 0.3);
+  }
+}
+
+/* Flicker animation (like broken Gotham lights) */
+@keyframes flicker {
+  0%, 100% { opacity: 1; }
+  41% { opacity: 1; }
+  42% { opacity: 0.8; }
+  43% { opacity: 1; }
+  45% { opacity: 0.3; }
+  46% { opacity: 1; }
+}
+
+/* Slide in from right */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Fade in up */
+@keyframes fade-in-up {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Animation classes */
+.animate-bat-pulse {
+  animation: bat-pulse 2s ease-in-out infinite;
+}
+
+.animate-bat-float {
+  animation: bat-float 3s ease-in-out infinite;
+}
+
+.animate-bat-signal {
+  animation: bat-signal 3s ease-in-out infinite;
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+.animate-flicker {
+  animation: flicker 3s linear infinite;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.4s ease-out;
+}
+
+/* ========================================== */
+/* 🦇 GOTHAM BACKGROUNDS                      */
+/* ========================================== */
+
+.gotham-bg {
+  background-color: #000000;
+  background-image: 
+    radial-gradient(ellipse at top, rgba(234, 179, 8, 0.02) 0%, transparent 50%),
+    radial-gradient(ellipse at bottom, rgba(0, 0, 0, 1) 0%, transparent 50%);
+}
+
+.gotham-grid {
+  background-image: 
+    linear-gradient(rgba(234, 179, 8, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(234, 179, 8, 0.02) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Gotham night sky gradient */
+.gotham-sky {
+  background: linear-gradient(
+    180deg,
+    #000000 0%,
+    #0a0a0a 30%,
+    #111111 60%,
+    #000000 100%
+  );
+}
+
+/* ========================================== */
+/* 🦇 FOCUS STATES                            */
+/* ========================================== */
+
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: 2px solid rgba(234, 179, 8, 0.5);
+  outline-offset: 2px;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: rgba(234, 179, 8, 0.5) !important;
+  box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.15);
+}
+
+/* ========================================== */
+/* 🦇 BUTTON STYLES                           */
+/* ========================================== */
+
+button {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* ========================================== */
+/* 🦇 LINK STYLES                             */
+/* ========================================== */
+
+a {
+  color: #eab308;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+a:hover {
+  color: #facc15;
+  text-shadow: 0 0 10px rgba(234, 179, 8, 0.3);
+}
+
+/* ========================================== */
+/* 🦇 INPUT PLACEHOLDER                       */
+/* ========================================== */
+
+::placeholder {
+  color: #4b5563;
+  opacity: 1;
+}
+
+:-ms-input-placeholder {
+  color: #4b5563;
+}
+
+::-ms-input-placeholder {
+  color: #4b5563;
+}
+
+/* ========================================== */
+/* 🦇 TABLE STYLES                            */
+/* ========================================== */
+
+table {
+  border-collapse: collapse;
+}
+
+th {
+  text-align: left;
+  font-weight: 500;
+}
+
+tr {
+  transition: background-color 0.2s ease;
+}
+
+/* ========================================== */
+/* 🦇 CUSTOM RANGE SLIDER                     */
+/* ========================================== */
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-track {
+  height: 8px;
+  background: #1f2937;
+  border-radius: 9999px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  background: linear-gradient(135deg, #facc15 0%, #eab308 100%);
+  border-radius: 50%;
+  margin-top: -6px;
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.5);
+  transition: all 0.2s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 15px rgba(234, 179, 8, 0.7);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 8px;
+  background: #1f2937;
+  border-radius: 9999px;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  background: linear-gradient(135deg, #facc15 0%, #eab308 100%);
+  border-radius: 50%;
+  border: none;
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.5);
+}
+
+/* ========================================== */
+/* 🦇 CHECKBOX & TOGGLE STYLES                */
+/* ========================================== */
+
+input[type="checkbox"] {
+  accent-color: #eab308;
+}
+
+/* ========================================== */
+/* 🦇 NUMBER INPUT ARROWS                     */
+/* ========================================== */
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 0.5;
+}
+
+input[type="number"]:hover::-webkit-inner-spin-button,
+input[type="number"]:hover::-webkit-outer-spin-button {
+  opacity: 1;
+}
+
+/* ========================================== */
+/* 🦇 SELECT DROPDOWN                         */
+/* ========================================== */
+
+select {
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23eab308' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+
+select option {
+  background: #000000;
+  color: #e5e7eb;
+  padding: 8px;
+}
+
+/* ========================================== */
+/* 🦇 MODAL BACKDROP                          */
+/* ========================================== */
+
+.modal-backdrop {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* ========================================== */
+/* 🦇 TOAST NOTIFICATIONS                     */
+/* ========================================== */
+
+.toast-enter {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+.toast-exit {
+  animation: slide-in-right 0.3s ease-out reverse;
+}
+
+/* ========================================== */
+/* 🦇 LOADING STATES                          */
+/* ========================================== */
+
+.loading-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(234, 179, 8, 0.05) 0%,
+    rgba(234, 179, 8, 0.1) 50%,
+    rgba(234, 179, 8, 0.05) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* ========================================== */
+/* 🦇 PROGRESS BAR                            */
+/* ========================================== */
+
+.progress-bar {
+  transition: width 0.5s ease-out;
+}
+
+/* ========================================== */
+/* 🦇 TOOLTIP                                 */
+/* ========================================== */
+
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  background: #000000;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #facc15;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.2s ease;
+  z-index: 1000;
+}
+
+[data-tooltip]:hover::after {
+  opacity: 1;
+  visibility: visible;
+  bottom: calc(100% + 8px);
+}
+
+/* ========================================== */
+/* 🦇 CARD SHINE EFFECT                       */
+/* ========================================== */
+
+.card-shine {
+  position: relative;
+  overflow: hidden;
+}
+
+.card-shine::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(234, 179, 8, 0.1),
+    transparent
+  );
+  transition: left 0.5s ease;
+}
+
+.card-shine:hover::before {
+  left: 100%;
+}
+
+/* ========================================== */
+/* 🦇 RESPONSIVE HELPERS                      */
+/* ========================================== */
+
+@media (max-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+}
+
+/* ========================================== */
+/* 🦇 PRINT STYLES                            */
+/* ========================================== */
+
+@media print {
+  body {
+    background: white;
+    color: black;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* ========================================== */
+/* 🦇 REDUCED MOTION                          */
+/* ========================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ========================================== */
+/* 🦇 UTILITY CLASSES                         */
+/* ========================================== */
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.text-gradient-gold {
+  background: linear-gradient(135deg, #facc15 0%, #eab308 50%, #ca8a04 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.border-gradient-gold {
+  border: 1px solid transparent;
+  background: linear-gradient(#000, #000) padding-box,
+              linear-gradient(135deg, #facc15, #eab308) border-box;
+}
+
+/* ========================================== */
+/* 🦇 END OF BATMAN THEME                     */
+/* ========================================== */
