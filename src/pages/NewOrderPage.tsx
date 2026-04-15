@@ -99,8 +99,9 @@ export function NewOrderPage({ apis, bundles, orders, prefillOrder, onCreateOrde
   useEffect(() => {
     const fetchMinViews = async () => {
       try {
-        const backendUrl = import.meta.env.VITE_BACKEND_URL || "https://backend-y30y.onrender.com";
-        const response = await fetch("https://iamsuperman-backend.onrender.com/api/settings/min-views");
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || "https://iamsuperman-backend.onrender.com";
+        const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim().replace(/\/$/, "") || "https://iamsuperman-backend.onrender.com";
+const response = await fetch(`${backendUrl}/api/settings/min-views`);
         if (response.ok) {
           const data = await response.json();
           if (data.minViewsPerRun) {
@@ -272,8 +273,9 @@ const commentsService = selectedApi?.services.find(
     setSeed((current) => current + 1); // 🔥 Force regenerate pattern
 
     // Also update backend
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || "https://backend-y30y.onrender.com";
-    fetch("https://iamsuperman-backend.onrender.com/api/settings/min-views", {
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || "https://iamsuperman-backend.onrender.com";
+    const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim().replace(/\/$/, "") || "https://iamsuperman-backend.onrender.com";
+fetch(`${backendUrl}/api/settings/min-views`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ minViewsPerRun: newValue }),
