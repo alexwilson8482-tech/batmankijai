@@ -1,1604 +1,1249 @@
-import { useEffect, useMemo, useState, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import type { BackendRunInfo, CreatedOrder } from "../types/order";
-import { OrderCard } from "../components/OrderCard";
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
+const mongoose = require('mongoose');
 
-interface OrdersPageProps {
-  orders: CreatedOrder[];
-  notice: string;
-  controllingOrderId: string | null;
-  onControlOrder: (order: CreatedOrder, action: "pause" | "resume" | "cancel") => void;
-  onCloneOrder: (order: CreatedOrder) => void;
-  onDismissNotice: () => void;
-}
+const app = express();
+const PORT = process.env.PORT || 5000;
 
-type TabType = "running" | "completed" | "scheduled" | "cancelled";
-type ViewMode = "rows" | "columns";
+app.use(cors());
+app.use(express.json());
 
-interface GroupedOrder {
-  id: string;
-  batchId: string | null;
-  name: string;
-  orders: CreatedOrder[];
-  isBatch: boolean;
-  totalViews: number;
-  linksCount: number;
-  createdAt: string;
-}
+/* =========================
+   🔥 MONGODB CONNECTION
+========================= */
+const MONGODB_URI = process.env.MONGODB_URI ||
+  'mongodb+srv://harshaffiliate16_db_user:5xJ3LN2LqA6qF6nt@cluster0.szkskqk.mongodb.net/?appName=Cluster0';
 
-const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-  running: { bg: "bg-yellow-500/15", text: "text-yellow-300", dot: "bg-yellow-400" },
-  processing: { bg: "bg-yellow-500/15", text: "text-yellow-300", dot: "bg-yellow-400" },
-  completed: { bg: "bg-emerald-500/15", text: "text-emerald-300", dot: "bg-emerald-400" },
-  scheduled: { bg: "bg-amber-500/15", text: "text-amber-300", dot: "bg-amber-400" },
-  paused: { bg: "bg-orange-500/15", text: "text-orange-300", dot: "bg-orange-400" },
-  cancelled: { bg: "bg-red-500/15", text: "text-red-300", dot: "bg-red-400" },
-  failed: { bg: "bg-red-500/15", text: "text-red-300", dot: "bg-red-400" },
-  pending: { bg: "bg-gray-500/15", text: "text-gray-300", dot: "bg-gray-400" },
+/* =========================
+   🔥 MONGODB SCHEMAS
+========================= */
+const RunSchema = new mongoose.Schema({
+  id:              { type: Number,  required: true, index: true },
+  schedulerOrderId:{ type: String,  required: true, index: true },
+  label:           { type: String,  required: true },
+  apiUrl:          { type: String,  required: true },
+  apiKey:          { type: String,  required: true },
+  service:         { type: String,  required: true },
+  link:            { type: String,  required: true },
+  quantity:        { type: Number,  required: true },
+  time:            { type: Date,    required: true },
+  done:            { type: Boolean, default: false },
+  status:          { type: String,  default: 'pending', index: true },
+  smmOrderId:      { type: Number,  default: null },
+  createdAt:       { type: Date,    default: Date.now },
+  executedAt:      { type: Date,    default: null },
+  error:           { type: String,  default: null },
+  comments:        { type: String,  default: null },
+});
+
+// 🔥 Compound index for scheduler query performance
+RunSchema.index({ done: 1, status: 1 });
+RunSchema.index({ schedulerOrderId: 1, status: 1 });
+RunSchema.index({ link: 1, label: 1, status: 1 });
+
+const OrderSchema = new mongoose.Schema({
+  schedulerOrderId: { type: String, required: true, unique: true, index: true },
+  name:             { type: String, required: true },
+  link:             { type: String, required: true },
+  status:           { type: String, default: 'pending' },
+  totalRuns:        { type: Number, required: true },
+  completedRuns:    { type: Number, default: 0 },
+  runStatuses:      [{ type: String }],
+  createdAt:        { type: Date,   default: Date.now },
+  lastUpdatedAt:    { type: Date,   default: Date.now },
+});
+
+const Run   = mongoose.model('Run',   RunSchema);
+const Order = mongoose.model('Order', OrderSchema);
+
+/* =========================
+   🔥 GLOBAL SETTINGS
+========================= */
+let MIN_VIEWS_PER_RUN = 100;
+
+/* =========================
+   🔥 5 SEPARATE QUEUES + FLAGS
+========================= */
+let viewsQueue    = [];
+let likesQueue    = [];
+let sharesQueue   = [];
+let savesQueue    = [];
+let commentsQueue = [];
+
+// 🔥 Single object for executing flags - easier to manage
+const isExecuting = {
+  VIEWS:    false,
+  LIKES:    false,
+  SHARES:   false,
+  SAVES:    false,
+  COMMENTS: false,
 };
 
-const TABS: { key: TabType; label: string; icon: string }[] = [
-  { key: "running", label: "Active", icon: "⚡" },
-  { key: "scheduled", label: "Scheduled", icon: "⏱" },
-  { key: "completed", label: "Completed", icon: "✓" },
-  { key: "cancelled", label: "Cancelled", icon: "❌" },
-];
+// 🔥 Cooldown tracker - prevents sending same link+label too fast
+const lastExecutionTime = new Map();
+const MIN_COOLDOWN_MS   = 10 * 60 * 1000; // 10 minutes
 
-// 🔥 Shared getRealStatus - single source of truth
-function getRealStatus(order: CreatedOrder): string {
-  if (order.status === "cancelled") return "cancelled";
-  if (order.status === "failed") return "failed";
+// 🔥 Max queue size safety guard
+const MAX_QUEUE_SIZE = 500;
 
-  const runs = order.runs || [];
-  const now = Date.now();
+/* =========================
+   🔥 START SERVER FIRST
+   So Render always detects port
+========================= */
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`========================================`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Minimum views per run: ${MIN_VIEWS_PER_RUN}`);
+  console.log(`Scheduler runs every 10 seconds`);
+  console.log(`========================================`);
+});
 
-  if (runs.length > 0) {
-    const allFuture = runs.every((run) => {
-      const runTime =
-        run?.at instanceof Date
-          ? run.at.getTime()
-          : new Date(run?.at ?? now).getTime();
-      return runTime > now;
-    });
-    if (allFuture && order.status !== "paused") {
-      return "scheduled";
+/* =========================
+   🔥 THEN CONNECT MONGODB
+========================= */
+mongoose.connect(MONGODB_URI, {
+  serverSelectionTimeoutMS: 30000,
+  maxPoolSize: 10,
+})
+.then(async () => {
+  console.log('✅ MongoDB Connected Successfully');
+
+  // 🔥 Clean truly stuck runs on startup (older than 15 min, never got executedAt)
+  try {
+    const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const cleanResult = await Run.updateMany(
+      {
+        status: 'processing',
+        executedAt: null,
+        createdAt: { $lt: fifteenMinAgo },
+      },
+      { $set: { status: 'pending', error: null } }
+    );
+    if (cleanResult.modifiedCount > 0) {
+      console.log(`✅ Cleaned ${cleanResult.modifiedCount} stuck runs on startup`);
+    }
+
+    // 🔥 Also reset any orphaned 'queued' runs back to pending
+    // (happens when server restarts mid-queue)
+    const queuedClean = await Run.updateMany(
+      { status: 'queued' },
+      { $set: { status: 'pending' } }
+    );
+    if (queuedClean.modifiedCount > 0) {
+      console.log(`✅ Reset ${queuedClean.modifiedCount} orphaned queued runs to pending`);
+    }
+  } catch (err) {
+    console.error('Warning: Could not clean stuck runs:', err.message);
+  }
+})
+.catch(err => {
+  console.error('❌ MongoDB Connection Error:', err);
+  console.log('⚠️ Server running but database not connected');
+});
+
+/* =========================
+   🔥 HELPER: QUEUE MAP
+   Maps label → queue array
+========================= */
+function getQueueForLabel(label) {
+  switch (label) {
+    case 'VIEWS':    return viewsQueue;
+    case 'LIKES':    return likesQueue;
+    case 'SHARES':   return sharesQueue;
+    case 'SAVES':    return savesQueue;
+    case 'COMMENTS': return commentsQueue;
+    default:         return null;
+  }
+}
+
+function pushToQueue(run) {
+  const queue = getQueueForLabel(run.label);
+  if (!queue) return false;
+  if (queue.length >= MAX_QUEUE_SIZE) {
+    console.warn(`[QUEUE] ${run.label} queue full (${MAX_QUEUE_SIZE}), dropping run #${run.id}`);
+    return false;
+  }
+  queue.push(run);
+  return true;
+}
+
+/* =========================
+   🔥 PLACE ORDER WITH SMM API
+========================= */
+async function placeOrder({ apiUrl, apiKey, service, link, quantity, comments }) {
+  // 🔥 FIXED: Build params correctly based on type
+  const params = new URLSearchParams({
+    key:    apiKey,
+    action: 'add',
+    service: String(service),
+    link:   String(link),
+  });
+
+  if (comments) {
+    // 🔥 FIXED: Comments orders - send comments, NOT quantity
+    // Quantity for SMM API = number of comment lines (handled by comments string)
+    params.append('comments', comments);
+  } else {
+    // Normal orders - send quantity
+    params.append('quantity', String(quantity));
+  }
+
+  const response = await axios.post(apiUrl, params.toString(), {
+    headers:  { 'Content-Type': 'application/x-www-form-urlencoded' },
+    timeout:  30000, // 🔥 FIXED: 30s timeout - prevent indefinite hang
+  });
+
+  return response.data;
+}
+
+/* =========================
+   🔥 ADD RUNS TO DATABASE
+========================= */
+async function addRuns(services, baseConfig, schedulerOrderId) {
+  const runsToInsert = [];
+
+  for (const [key, serviceConfig] of Object.entries(services)) {
+    if (!serviceConfig) continue;
+
+    const label = key.toUpperCase();
+
+    for (const run of serviceConfig.runs) {
+      let quantity;
+
+      // VIEWS
+      if (label === 'VIEWS') {
+        // 🔥 FIXED: Use live MIN_VIEWS_PER_RUN variable, not hardcoded 100
+        if (!run.quantity || run.quantity < MIN_VIEWS_PER_RUN) continue;
+        quantity = run.quantity;
+      }
+
+      // COMMENTS
+      else if (label === 'COMMENTS') {
+        if (!run.comments) continue;
+
+        let lines = run.comments
+          .split('\n')
+          .map(c => c.trim())
+          .filter(c => c.length > 0);
+
+        if (lines.length < 1) continue;
+
+        // Limit max to 10 comments per run
+        if (lines.length > 10) {
+          lines = lines.sort(() => Math.random() - 0.5).slice(0, 10);
+        }
+
+        run.comments = lines.join('\n');
+        quantity     = lines.length;
+      }
+
+      // OTHERS (likes, shares, saves)
+      else {
+        if (!run.quantity || run.quantity <= 0) continue;
+        quantity = run.quantity;
+      }
+
+      runsToInsert.push({
+        id:               Date.now() + Math.random(),
+        schedulerOrderId,
+        label,
+        apiUrl:           baseConfig.apiUrl,
+        apiKey:           baseConfig.apiKey,
+        service:          serviceConfig.serviceId,
+        link:             baseConfig.link,
+        quantity,
+        time:             new Date(run.time),
+        done:             false,
+        status:           'pending',
+        smmOrderId:       null,
+        createdAt:        new Date(),
+        executedAt:       null,
+        error:            null,
+        comments:         run.comments || null,
+      });
     }
   }
 
-  if (runs.length > 0) {
-    const allPast = runs.every((run) => {
-      const runTime =
-        run?.at instanceof Date
-          ? run.at.getTime()
-          : new Date(run?.at ?? now).getTime();
-      return runTime <= now;
-    });
-    if (allPast) return "completed";
+  // 🔥 FIXED: Batch insert all runs in one DB call instead of N individual saves
+  if (runsToInsert.length > 0) {
+    await Run.insertMany(runsToInsert);
   }
 
-  if (order.status === "processing") return "running";
-  if (order.status === "pending") return "running";
-
-  return order.status;
+  return runsToInsert;
 }
 
-// 🔥 BackendRunTable - Displays actual backend run data
-function BackendRunTable({ runs }: { runs: BackendRunInfo[] }) {
-  const labelColors: Record<string, string> = {
-    VIEWS: "text-yellow-400",
-    LIKES: "text-pink-400",
-    SHARES: "text-blue-400",
-    SAVES: "text-purple-400",
-    COMMENTS: "text-green-400",
-  };
+/* =========================
+   🔥 UPDATE ORDER STATUS
+========================= */
+async function updateOrderStatus(schedulerOrderId) {
+  if (!schedulerOrderId) return;
 
-  const statusColors: Record<string, string> = {
-    completed: "text-emerald-400",
-    failed: "text-red-400",
-    cancelled: "text-red-400",
-    processing: "text-yellow-400",
-    queued: "text-amber-400",
-    pending: "text-gray-400",
-    paused: "text-orange-400",
-  };
+  // 🔥 Use single aggregation instead of two separate queries
+  const orderRuns = await Run.find(
+    { schedulerOrderId },
+    { status: 1 } // Only fetch status field - faster
+  ).lean(); // .lean() returns plain JS objects - 2x faster than full Mongoose docs
 
-  const statusIcons: Record<string, string> = {
-    completed: "✅",
-    failed: "❌",
-    cancelled: "🚫",
-    processing: "⚡",
-    queued: "⏳",
-    pending: "🕐",
-    paused: "⏸️",
-  };
+  const order = await Order.findOne({ schedulerOrderId }).lean();
+  if (!order) return;
 
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-[10px]">
-        <thead>
-          <tr className="border-b border-gray-800 text-gray-600 uppercase tracking-wider">
-            <th className="pb-2 pr-3">Type</th>
-            <th className="pb-2 pr-3">Qty</th>
-            <th className="pb-2 pr-3">Scheduled</th>
-            <th className="pb-2 pr-3">Status</th>
-            <th className="pb-2 pr-3">SMM ID</th>
-            <th className="pb-2">Executed</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-900">
-          {runs.map((run, index) => {
-            const scheduledTime = new Date(run.time);
-            const executedTime = run.executedAt ? new Date(run.executedAt) : null;
-            const isCompleted = run.status === "completed";
-            const isFailed = run.status === "failed" || run.status === "cancelled";
+  // 🔥 Don't overwrite cancelled orders
+  if (order.status === 'cancelled') return;
 
-            return (
-              <tr key={`${run.id}-${index}`} className="hover:bg-gray-900/50">
-                <td className="py-1.5 pr-3">
-                  <span
-                    className={`font-semibold ${labelColors[run.label] || "text-gray-400"}`}
-                  >
-                    {run.label}
-                  </span>
-                </td>
-                <td className="py-1.5 pr-3 text-gray-300 font-mono">
-                  {run.quantity.toLocaleString()}
-                </td>
-                <td className="py-1.5 pr-3 text-gray-500">
-                  <span title={scheduledTime.toLocaleString()}>
-                    {scheduledTime.toLocaleDateString()}{" "}
-                    {scheduledTime.toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </span>
-                </td>
-                <td className="py-1.5 pr-3">
-                  <span
-                    className={`flex items-center gap-1 ${statusColors[run.status] || "text-gray-400"}`}
-                  >
-                    <span>{statusIcons[run.status] || "❓"}</span>
-                    <span className="capitalize">{run.status}</span>
-                  </span>
-                  {run.error && (
-                    <span
-                      className="block text-red-400/70 text-[9px] mt-0.5 max-w-[150px] truncate"
-                      title={run.error}
-                    >
-                      {run.error}
-                    </span>
-                  )}
-                </td>
-                <td className="py-1.5 pr-3">
-                  {isCompleted && run.smmOrderId ? (
-                    <span className="font-mono text-emerald-400">
-                      #{run.smmOrderId}
-                    </span>
-                  ) : (
-                    <span className="text-gray-700">—</span>
-                  )}
-                </td>
-                <td className="py-1.5">
-                  {executedTime ? (
-                    <span className="text-gray-500">
-                      {executedTime.toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                  ) : (
-                    <span className="text-gray-700">—</span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+  const totalRuns      = orderRuns.length;
+  const completedRuns  = orderRuns.filter(r => r.status === 'completed').length;
+  const failedRuns     = orderRuns.filter(r => r.status === 'failed').length;
+  const cancelledRuns  = orderRuns.filter(r => r.status === 'cancelled').length;
+  const processingRuns = orderRuns.filter(r => r.status === 'processing').length;
+  const queuedRuns     = orderRuns.filter(r => r.status === 'queued').length;
+  const pausedRuns     = orderRuns.filter(r => r.status === 'paused').length;
+  const pendingRuns    = orderRuns.filter(r => r.status === 'pending').length;
+  const activeRuns     = totalRuns - cancelledRuns;
+
+  let newStatus;
+
+  if (activeRuns === 0) {
+    newStatus = 'cancelled';
+  } else if (completedRuns === activeRuns) {
+    newStatus = 'completed';
+  } else if (failedRuns === activeRuns) {
+    newStatus = 'failed';
+  } else if (pausedRuns > 0 && processingRuns === 0 && queuedRuns === 0) {
+    newStatus = 'paused';
+  } else if (processingRuns > 0 || completedRuns > 0 || queuedRuns > 0) {
+    newStatus = 'running';
+  } else if (pendingRuns > 0) {
+    newStatus = 'pending';
+  } else {
+    newStatus = order.status;
+  }
+
+  await Order.updateOne(
+    { schedulerOrderId },
+    {
+      $set: {
+        status:       newStatus,
+        completedRuns,
+        totalRuns,
+        lastUpdatedAt: new Date(),
+        runStatuses:  orderRuns.map(r => r.status),
+      },
+    }
   );
 }
 
-export function OrdersPage({
-  orders,
-  notice,
-  controllingOrderId,
-  onControlOrder,
-  onCloneOrder,
-  onDismissNotice,
-}: OrdersPageProps) {
-  const [query, setQuery] = useState("");
-  const [viewMode, setViewMode] = useState<ViewMode>("rows");
-  const [activeTab, setActiveTab] = useState<TabType>("running");
-  const [openedGroupId, setOpenedGroupId] = useState<string | null>(null);
-  const openedGroupIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    openedGroupIdRef.current = openedGroupId;
-  }, [openedGroupId]);
-
-  function getProgress(order: CreatedOrder) {
-    const safeRuns = order.runs || [];
-    const totalRuns = safeRuns.length;
-    if (totalRuns === 0) return { percent: 0, completed: 0, total: 0 };
-
-    const now = Date.now();
-    const statusCompleted = (order.runStatuses || []).filter(
-      (s) => s === "completed"
-    ).length;
-    const completed = Math.min(
-      totalRuns,
-      Math.max(order.completedRuns || 0, statusCompleted)
-    );
-
-    return {
-      percent: Math.round((completed / totalRuns) * 100),
-      completed,
-      total: totalRuns,
-    };
+/* =========================
+   🔥 EXECUTE A SINGLE RUN
+========================= */
+async function executeRun(run) {
+  // 🔥 Guard: validate run object
+  if (!run || !run._id) {
+    console.warn(`[executeRun] Invalid run object, skipping`);
+    return;
   }
 
-  function getGroupProgress(group: GroupedOrder) {
-    let completedCount = 0;
-    let totalCount = 0;
-
-    group.orders.forEach((order) => {
-      const progress = getProgress(order);
-      completedCount += progress.completed;
-      totalCount += progress.total;
-    });
-
-    return {
-      percent: totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0,
-      completed: completedCount,
-      total: totalCount,
-    };
+  // 🔥 Guard: skip if run was cancelled before we got here
+  if (run.status === 'cancelled') {
+    console.log(`[${run.label}] Run #${run.id} already cancelled, skipping`);
+    return;
   }
 
-  function getGroupStatus(group: GroupedOrder): string {
-    const statuses = group.orders.map((o) => getRealStatus(o));
-    if (statuses.every((s) => s === "cancelled" || s === "failed")) return "cancelled";
-    if (statuses.every((s) => s === "completed")) return "completed";
-    if (statuses.every((s) => s === "scheduled")) return "scheduled";
-    if (statuses.some((s) => s === "failed")) return "failed";
-    if (statuses.some((s) => s === "paused")) return "paused";
-    if (statuses.some((s) => s === "running")) return "running";
-    return "running";
+  // 🔥 Guard: skip if quantity is invalid
+  if (!run.quantity || run.quantity <= 0) {
+    console.warn(`[${run.label}] Run #${run.id} has invalid quantity, marking failed`);
+    await Run.updateOne({ _id: run._id }, { $set: { status: 'failed', error: 'Invalid quantity' } });
+    return;
   }
 
-  function getGroupCategory(group: GroupedOrder): TabType {
-    const status = getGroupStatus(group);
-    if (status === "cancelled" || status === "failed") return "cancelled";
-    if (status === "completed") return "completed";
-    if (status === "scheduled") return "scheduled";
-    return "running";
+  // 🔥 Check if parent order is still active
+  const order = await Order.findOne(
+    { schedulerOrderId: run.schedulerOrderId },
+    { status: 1 }
+  ).lean();
+
+  if (!order || order.status === 'cancelled') {
+    console.log(`[${run.label}] Order cancelled → skipping run #${run.id}`);
+    await Run.updateOne({ _id: run._id }, { $set: { status: 'cancelled', done: true } });
+    return;
   }
 
-  function toShortLink(link: string) {
-    if (!link) return "-";
-    return link.length > 48 ? `${link.slice(0, 30)}...${link.slice(-12)}` : link;
+  if (order.status === 'paused') {
+    console.log(`[${run.label}] Order paused → skipping run #${run.id}`);
+    await Run.updateOne({ _id: run._id }, { $set: { status: 'paused' } });
+    return;
   }
 
-  function extractReelId(link: string) {
-    const match = link.match(/\/reel\/([^/?]+)/);
-    return match ? match[1] : link.slice(-15);
-  }
+  try {
+    // 🔥 FIXED: Cross-order link+label protection
+    // Check if same link + same label is already being processed anywhere
+    const activeSameType = await Run.findOne({
+      link:   run.link,
+      label:  run.label,
+      status: 'processing',
+      _id:    { $ne: run._id },
+    }).lean();
 
-  const groupedOrders = useMemo(() => {
-    const groups: Map<string, GroupedOrder> = new Map();
-
-    orders.forEach((order) => {
-      const groupKey = order.batchId || order.id;
-
-      if (groups.has(groupKey)) {
-        const existing = groups.get(groupKey)!;
-        existing.orders.push(order);
-        existing.totalViews += order.totalViews;
-        existing.linksCount += 1;
-      } else {
-        groups.set(groupKey, {
-          id: groupKey,
-          batchId: order.batchId || null,
-          name: order.name,
-          orders: [order],
-          isBatch: !!order.batchId,
-          totalViews: order.totalViews,
-          linksCount: 1,
-          createdAt: order.createdAt,
-        });
-      }
-    });
-
-    groups.forEach((group) => {
-      group.orders.sort((a, b) => (a.batchIndex || 0) - (b.batchIndex || 0));
-    });
-
-    return Array.from(groups.values());
-  }, [orders]);
-
-  const categorizedGroups = useMemo(() => {
-    const running: GroupedOrder[] = [];
-    const completed: GroupedOrder[] = [];
-    const scheduled: GroupedOrder[] = [];
-    const cancelled: GroupedOrder[] = [];
-
-    groupedOrders.forEach((group) => {
-      const category = getGroupCategory(group);
-      if (category === "running") running.push(group);
-      else if (category === "completed") completed.push(group);
-      else if (category === "scheduled") scheduled.push(group);
-      else if (category === "cancelled") cancelled.push(group);
-    });
-
-    running.sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-    completed.sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-    scheduled.sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
-    cancelled.sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-
-    return { running, completed, scheduled, cancelled };
-  }, [groupedOrders]);
-
-  const filteredGroups = useMemo(() => {
-    const groupsForTab = categorizedGroups[activeTab];
-    const value = query.trim().toLowerCase();
-    if (!value) return groupsForTab;
-
-    return groupsForTab.filter(
-      (group) =>
-        group.name.toLowerCase().includes(value) ||
-        group.orders.some(
-          (order) =>
-            order.link.toLowerCase().includes(value) ||
-            order.id.toLowerCase().includes(value)
-        )
-    );
-  }, [categorizedGroups, activeTab, query]);
-
-  const openedGroup = useMemo(
-    () => groupedOrders.find((group) => group.id === openedGroupId) ?? null,
-    [groupedOrders, openedGroupId]
-  );
-
-  useEffect(() => {
-    if (!openedGroupId) return;
-    const stillExists = groupedOrders.some((group) => group.id === openedGroupId);
-    if (!stillExists) setOpenedGroupId(null);
-  }, [groupedOrders, openedGroupId]);
-
-  function StatusBadge({ status }: { status: string }) {
-    const colors = STATUS_COLORS[status] || STATUS_COLORS.pending;
-    return (
-      <span
-        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${colors.bg} ${colors.text}`}
-      >
-        <span
-          className={`h-1.5 w-1.5 rounded-full ${colors.dot} ${status === "running" ? "animate-pulse" : ""}`}
-        />
-        {status.charAt(0).toUpperCase() + status.slice(1)}
-      </span>
-    );
-  }
-
-  function ProgressBar({
-    percent,
-    size = "normal",
-  }: {
-    percent: number;
-    size?: "small" | "normal";
-  }) {
-    const height = size === "small" ? "h-1" : "h-1.5";
-    const getColor = () => {
-      if (percent === 100) return "bg-emerald-500";
-      if (percent > 50) return "bg-yellow-500";
-      return "bg-yellow-600";
-    };
-    return (
-      <div className={`w-full overflow-hidden rounded-full bg-gray-800 ${height}`}>
-        <div
-          className={`${height} rounded-full transition-all duration-500 ${getColor()}`}
-          style={{ width: `${percent}%` }}
-        />
-      </div>
-    );
-  }
-
-  function EmptyState({ tab }: { tab: TabType }) {
-    const messages = {
-      running: { title: "No active missions", description: "Missions in progress will appear here" },
-      completed: { title: "No completed missions", description: "Finished missions will appear here" },
-      scheduled: { title: "No scheduled missions", description: "Future missions will appear here" },
-      cancelled: { title: "No cancelled missions", description: "Cancelled & failed missions will appear here" },
-    };
-    const icons = { running: "⚡", completed: "✅", scheduled: "📅", cancelled: "🗑️" };
-
-    return (
-      <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-yellow-500/30 bg-black py-16">
-        <span className="text-4xl">{icons[tab]}</span>
-        <p className="mt-4 text-sm font-medium text-yellow-400">{messages[tab].title}</p>
-        <p className="mt-1 text-xs text-gray-600">{messages[tab].description}</p>
-      </div>
-    );
-  }
-
-  function StatsSummary() {
-    const stats = [
-      { label: "Active", count: categorizedGroups.running.length, color: "text-yellow-400", icon: "⚡" },
-      { label: "Scheduled", count: categorizedGroups.scheduled.length, color: "text-amber-400", icon: "⏱" },
-      { label: "Completed", count: categorizedGroups.completed.length, color: "text-emerald-400", icon: "✅" },
-      { label: "Cancelled", count: categorizedGroups.cancelled.length, color: "text-red-400", icon: "❌" },
-    ];
-
-    return (
-      <div className="grid grid-cols-4 gap-3">
-        {stats.map((stat) => (
-          <div
-            key={stat.label}
-            className="rounded-lg border border-yellow-500/20 bg-black px-4 py-3 text-center"
-          >
-            <div className="flex items-center justify-center gap-1">
-              <span className="text-sm">{stat.icon}</span>
-              <p className={`text-2xl font-bold ${stat.color}`}>{stat.count}</p>
-            </div>
-            <p className="mt-1 text-xs text-gray-600">{stat.label}</p>
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  function GroupTableRow({ group }: { group: GroupedOrder }) {
-    const progress = getGroupProgress(group);
-    const status = getGroupStatus(group);
-
-    return (
-      <tr
-        onClick={() => setOpenedGroupId(group.id)}
-        className="cursor-pointer border-t border-gray-800 transition hover:bg-yellow-500/5"
-      >
-        <td className="px-4 py-3">
-          <div className="flex items-center gap-2">
-            <p className="font-medium text-white">
-              {group.name || `Mission #${group.id.slice(0, 8)}`}
-            </p>
-            {group.isBatch && (
-              <span className="rounded-full bg-blue-500/20 border border-blue-500/30 px-2 py-0.5 text-[10px] text-blue-300">
-                📦 {group.linksCount} links
-              </span>
-            )}
-          </div>
-          <p className="mt-0.5 text-[11px] text-gray-600 font-mono">
-            {group.isBatch
-              ? group.batchId?.slice(0, 15)
-              : group.orders[0]?.id}
-          </p>
-        </td>
-        <td className="max-w-[220px] px-4 py-3">
-          {group.isBatch ? (
-            <p className="text-gray-500 text-xs">{group.linksCount} Instagram links</p>
-          ) : (
-            <p className="truncate text-gray-500" title={group.orders[0]?.link}>
-              {toShortLink(group.orders[0]?.link || "")}
-            </p>
-          )}
-        </td>
-        <td className="px-4 py-3">
-          <StatusBadge status={status} />
-        </td>
-        <td className="px-4 py-3">
-          <div className="w-32">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[11px] text-gray-600">
-                {progress.completed}/{progress.total} runs
-              </span>
-              <span className="text-[11px] font-medium text-gray-500">
-                {progress.percent}%
-              </span>
-            </div>
-            <ProgressBar percent={progress.percent} />
-          </div>
-        </td>
-        <td className="px-4 py-3 text-gray-600 text-xs">
-          {new Date(group.createdAt).toLocaleDateString()}
-          <span className="block text-gray-700">
-            {new Date(group.createdAt).toLocaleTimeString()}
-          </span>
-        </td>
-      </tr>
-    );
-  }
-
-  function GroupCardItem({ group }: { group: GroupedOrder }) {
-    const progress = getGroupProgress(group);
-    const status = getGroupStatus(group);
-    const isCancelled = status === "cancelled" || status === "failed";
-
-    return (
-      <button
-        type="button"
-        onClick={() => setOpenedGroupId(group.id)}
-        className={`group rounded-xl border bg-gradient-to-br from-gray-900 to-black p-4 text-left transition-all hover:shadow-lg w-full ${
-          isCancelled
-            ? "border-red-500/20 hover:border-red-500/40 hover:shadow-red-500/5"
-            : "border-yellow-500/20 hover:border-yellow-500/40 hover:shadow-yellow-500/5"
-        }`}
-      >
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <p
-                className={`truncate text-sm font-semibold ${isCancelled ? "text-red-200" : "text-white"} group-hover:text-yellow-100`}
-              >
-                {group.name || `Mission #${group.id.slice(0, 8)}`}
-              </p>
-              {group.isBatch && (
-                <span className="rounded-full bg-blue-500/20 border border-blue-500/30 px-1.5 py-0.5 text-[9px] text-blue-300">
-                  📦 {group.linksCount}
-                </span>
-              )}
-            </div>
-            <p className="mt-1 truncate text-xs text-gray-600 font-mono">
-              {group.isBatch
-                ? `Batch: ${group.linksCount} links`
-                : group.orders[0]?.id}
-            </p>
-          </div>
-          <StatusBadge status={status} />
-        </div>
-
-        {!group.isBatch && (
-          <p
-            className="mt-3 truncate text-xs text-gray-500"
-            title={group.orders[0]?.link}
-          >
-            {toShortLink(group.orders[0]?.link || "")}
-          </p>
-        )}
-
-        {group.isBatch && (
-          <div className="mt-3 flex flex-wrap gap-1">
-            {group.orders.slice(0, 3).map((order) => (
-              <span
-                key={order.id}
-                className={`rounded px-1.5 py-0.5 text-[9px] ${
-                  getRealStatus(order) === "cancelled" ||
-                  getRealStatus(order) === "failed"
-                    ? "bg-red-900/50 text-red-400"
-                    : "bg-gray-800 text-gray-400"
-                }`}
-              >
-                {extractReelId(order.link)}
-              </span>
-            ))}
-            {group.orders.length > 3 && (
-              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[9px] text-gray-500">
-                +{group.orders.length - 3} more
-              </span>
-            )}
-          </div>
-        )}
-
-        <div className="mt-4">
-          <div className="flex items-center justify-between text-xs mb-1.5">
-            <span className="text-gray-600">Progress</span>
-            <span className="text-gray-500">
-              {progress.completed}/{progress.total} ({progress.percent}%)
-            </span>
-          </div>
-          <ProgressBar percent={progress.percent} />
-        </div>
-
-        <div className="mt-3 flex items-center justify-between text-[11px] text-gray-600">
-          <span>{isCancelled ? "Cancelled" : "Deployed"}</span>
-          <span>{new Date(group.createdAt).toLocaleDateString()}</span>
-        </div>
-      </button>
-    );
-  }
-
-  // 🔥 FIXED: IndividualLinkCard - uses backendRuns for actual run data
-  function IndividualLinkCard({
-    order,
-    index,
-  }: {
-    order: CreatedOrder;
-    index: number;
-  }) {
-    const [showRuns, setShowRuns] = useState(false);
-    const progress = getProgress(order);
-    const status = getRealStatus(order);
-    const isControlling = controllingOrderId === order.id;
-    const isCancelled = status === "cancelled" || status === "failed";
-
-    // 🔥 FIXED: Prefer backendRuns (real data) over frontend runs for display
-    const hasBackendRuns =
-      order.backendRuns && order.backendRuns.length > 0;
-    const displayRunCount = hasBackendRuns
-      ? order.backendRuns!.length
-      : order.runs?.length || 0;
-
-    return (
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: index * 0.05 }}
-        className={`rounded-xl border bg-gradient-to-br from-gray-900 to-black p-4 ${
-          isCancelled ? "border-red-500/30" : "border-gray-800"
-        }`}
-      >
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span
-                className={`flex items-center justify-center h-6 w-6 rounded-full text-xs font-bold ${
-                  isCancelled
-                    ? "bg-red-500/20 text-red-400"
-                    : "bg-yellow-500/20 text-yellow-400"
-                }`}
-              >
-                {index + 1}
-              </span>
-              <a
-                href={order.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`truncate text-sm hover:underline ${
-                  isCancelled
-                    ? "text-red-400 hover:text-red-300"
-                    : "text-blue-400 hover:text-blue-300"
-                }`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {toShortLink(order.link)}
-              </a>
-            </div>
-            <p className="mt-1 ml-8 text-[10px] text-gray-600 font-mono">
-              {order.id}
-            </p>
-            {order.schedulerOrderId && (
-              <p className="ml-8 text-[9px] text-gray-700 font-mono">
-                Scheduler: {order.schedulerOrderId}
-              </p>
-            )}
-          </div>
-          <StatusBadge status={status} />
-        </div>
-
-        {/* Error Message */}
-        {order.errorMessage && (
-          <div className="mt-2 ml-8 rounded-md bg-red-500/10 border border-red-500/20 px-2 py-1">
-            <p className="text-[10px] text-red-400">❌ {order.errorMessage}</p>
-          </div>
-        )}
-
-        {/* Progress */}
-        <div className="mt-3 ml-8">
-          <div className="flex items-center justify-between text-xs mb-1">
-            <span className="text-gray-600">
-              {progress.completed}/{progress.total} runs
-            </span>
-            <span className="text-gray-500">{progress.percent}%</span>
-          </div>
-          <ProgressBar percent={progress.percent} size="small" />
-        </div>
-
-        {/* Stats */}
-        <div className="mt-3 ml-8 grid grid-cols-5 gap-2">
-          <div className="rounded-md bg-black/50 px-2 py-1 text-center">
-            <p className="text-xs font-medium text-yellow-400">
-              {(order.totalViews / 1000).toFixed(0)}k
-            </p>
-            <p className="text-[9px] text-gray-600">Views</p>
-          </div>
-          <div className="rounded-md bg-black/50 px-2 py-1 text-center">
-            <p className="text-xs font-medium text-pink-400">
-              {order.engagement.likes}
-            </p>
-            <p className="text-[9px] text-gray-600">Likes</p>
-          </div>
-          <div className="rounded-md bg-black/50 px-2 py-1 text-center">
-            <p className="text-xs font-medium text-blue-400">
-              {order.engagement.shares}
-            </p>
-            <p className="text-[9px] text-gray-600">Shares</p>
-          </div>
-          <div className="rounded-md bg-black/50 px-2 py-1 text-center">
-            <p className="text-xs font-medium text-purple-400">
-              {order.engagement.saves}
-            </p>
-            <p className="text-[9px] text-gray-600">Saves</p>
-          </div>
-          {/* 🔥 FIXED: Added comments column */}
-          <div className="rounded-md bg-black/50 px-2 py-1 text-center">
-            <p className="text-xs font-medium text-green-400">
-              {order.engagement.comments || 0}
-            </p>
-            <p className="text-[9px] text-gray-600">Comments</p>
-          </div>
-        </div>
-
-        {/* Controls */}
-        <div className="mt-3 ml-8 flex items-center gap-2 flex-wrap">
-          {!isCancelled && status === "running" && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onControlOrder(order, "pause");
-              }}
-              disabled={isControlling}
-              className="flex items-center gap-1 rounded-md border border-orange-500/30 bg-orange-500/10 px-2 py-1 text-[10px] font-medium text-orange-300 hover:bg-orange-500/20 transition disabled:opacity-50"
-            >
-              {isControlling ? "⏳" : "⏸️"} Pause
-            </button>
-          )}
-          {!isCancelled && status === "paused" && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onControlOrder(order, "resume");
-              }}
-              disabled={isControlling}
-              className="flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-300 hover:bg-emerald-500/20 transition disabled:opacity-50"
-            >
-              {isControlling ? "⏳" : "▶️"} Resume
-            </button>
-          )}
-          {!isCancelled && status !== "completed" && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (
-                  window.confirm(
-                    `Cancel this order?\n\nLink: ${order.link.slice(0, 50)}...`
-                  )
-                ) {
-                  onControlOrder(order, "cancel");
-                }
-              }}
-              disabled={isControlling}
-              className="flex items-center gap-1 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] font-medium text-red-300 hover:bg-red-500/20 transition disabled:opacity-50"
-            >
-              {isControlling ? "⏳" : "❌"} Cancel
-            </button>
-          )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onCloneOrder(order);
-            }}
-            className="flex items-center gap-1 rounded-md border border-gray-600 bg-black px-2 py-1 text-[10px] font-medium text-gray-400 hover:text-white hover:border-gray-500 transition"
-          >
-            📋 Clone
-          </button>
-          <a
-            href={order.link}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="flex items-center gap-1 rounded-md border border-gray-600 bg-black px-2 py-1 text-[10px] font-medium text-gray-400 hover:text-white hover:border-gray-500 transition"
-          >
-            🔗 Open
-          </a>
-
-          {/* View Runs Toggle */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowRuns(!showRuns);
-            }}
-            className={`flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium transition ml-auto ${
-              showRuns
-                ? "border-yellow-500/50 bg-yellow-500/20 text-yellow-300"
-                : "border-yellow-500/30 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20"
-            }`}
-          >
-            {showRuns ? "🔼 Hide Runs" : `📋 View Runs (${displayRunCount})`}
-          </button>
-        </div>
-
-        {/* 🔥 FIXED: Run List - shows backend runs if available, otherwise frontend runs */}
-        <AnimatePresence>
-          {showRuns && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-4 ml-8 overflow-hidden"
-            >
-              <div className="rounded-lg border border-yellow-500/20 bg-black/50 p-3">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-xs font-semibold text-yellow-400">
-                    📋 Run Schedule
-                    {hasBackendRuns && (
-                      <span className="ml-2 text-[9px] text-emerald-400">
-                        ✅ Live from backend
-                      </span>
-                    )}
-                  </h4>
-                  <span className="text-[10px] text-gray-600">
-                    {progress.completed} completed
-                  </span>
-                </div>
-
-                {/* 🔥 FIXED: Show BackendRunTable if we have backend data */}
-                {hasBackendRuns ? (
-                  <BackendRunTable runs={order.backendRuns!} />
-                ) : order.runs && order.runs.length > 0 ? (
-                  // Fallback: show frontend scheduled runs
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-[10px]">
-                      <thead>
-                        <tr className="border-b border-gray-800 text-gray-600 uppercase tracking-wider">
-                          <th className="pb-2 pr-3">#</th>
-                          <th className="pb-2 pr-3">Scheduled Time</th>
-                          <th className="pb-2 pr-3">Views</th>
-                          <th className="pb-2 pr-3">Likes</th>
-                          <th className="pb-2 pr-3">Shares</th>
-                          <th className="pb-2 pr-3">Saves</th>
-                          <th className="pb-2">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-900">
-                        {order.runs.map((run, i) => {
-                          const runTime =
-                            run.at instanceof Date
-                              ? run.at
-                              : new Date(run.at);
-                          const isPast = runTime.getTime() <= Date.now();
-                          const runStatus =
-                            order.runStatuses?.[i] || "pending";
-
-                          return (
-                            <tr key={i} className="hover:bg-gray-900/50">
-                              <td className="py-1.5 pr-3 text-gray-500">
-                                {i + 1}
-                              </td>
-                              <td className="py-1.5 pr-3 text-gray-400">
-                                {runTime.toLocaleDateString()}{" "}
-                                {runTime.toLocaleTimeString([], {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </td>
-                              <td className="py-1.5 pr-3 text-yellow-400">
-                                {(run.views || 0).toLocaleString()}
-                              </td>
-                              <td className="py-1.5 pr-3 text-pink-400">
-                                {run.likes || 0}
-                              </td>
-                              <td className="py-1.5 pr-3 text-blue-400">
-                                {run.shares || 0}
-                              </td>
-                              <td className="py-1.5 pr-3 text-purple-400">
-                                {run.saves || 0}
-                              </td>
-                              <td className="py-1.5">
-                                {runStatus === "completed" ? (
-                                  <span className="text-emerald-400">✅</span>
-                                ) : runStatus === "cancelled" ? (
-                                  <span className="text-red-400">🚫</span>
-                                ) : isPast ? (
-                                  <span className="text-yellow-400">⚡</span>
-                                ) : (
-                                  <span className="text-gray-500">🕐</span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-dashed border-gray-700 bg-black/30 p-4 text-center">
-                    <p className="text-xs text-gray-500">
-                      No runs data available. Sync will populate this.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
-    );
-  }
-
-  // Batch Detail Popup
-  function BatchDetailPopup({ group }: { group: GroupedOrder }) {
-    const overallProgress = getGroupProgress(group);
-    const overallStatus = getGroupStatus(group);
-    const isCancelled = overallStatus === "cancelled" || overallStatus === "failed";
-
-    const statusCounts = useMemo(() => {
-      const counts: Record<string, number> = {};
-      group.orders.forEach((order) => {
-        const status = getRealStatus(order);
-        counts[status] = (counts[status] || 0) + 1;
-      });
-      return counts;
-    }, [group.orders]);
-
-    const totalRunsInBatch = useMemo(() => {
-      return group.orders.reduce(
-        (sum, order) => sum + (order.backendRuns?.length || order.runs?.length || 0),
-        0
+    if (activeSameType) {
+      console.log(`[${run.label}] Same type already processing for link, re-queuing run #${run.id}`);
+      // 🔥 FIXED: Reset to pending so scheduler picks it up properly later
+      // Do NOT push back to queue directly - scheduler will re-add when processing clears
+      await Run.updateOne(
+        { _id: run._id },
+        { $set: { status: 'pending', time: new Date(Date.now() + 2 * 60 * 1000) } }
       );
-    }, [group.orders]);
+      return;
+    }
 
-    return (
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm px-4 py-6"
-        onClick={() => setOpenedGroupId(null)}
-      >
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className={`max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-2xl border bg-black shadow-2xl flex flex-col ${
-            isCancelled ? "border-red-500/30" : "border-yellow-500/30"
-          }`}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="border-b border-gray-800 px-5 py-4 flex-shrink-0">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3
-                    className={`text-lg font-semibold ${isCancelled ? "text-red-400" : "text-yellow-400"}`}
-                  >
-                    {group.name}
-                  </h3>
-                  {group.isBatch && (
-                    <span className="rounded-full bg-blue-500/20 border border-blue-500/30 px-2 py-0.5 text-xs text-blue-300">
-                      📦 Bulk Order
-                    </span>
-                  )}
-                  {isCancelled && (
-                    <span className="rounded-full bg-red-500/20 border border-red-500/30 px-2 py-0.5 text-xs text-red-300">
-                      ❌ Cancelled
-                    </span>
-                  )}
-                </div>
-                <p className="mt-0.5 text-xs text-gray-600 font-mono">
-                  {group.batchId || group.id}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setOpenedGroupId(null)}
-                className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-300 transition hover:bg-yellow-500/20"
-              >
-                ✕ Close
-              </button>
-            </div>
+    console.log(`[${run.label}] Executing run #${run.id} | qty: ${run.quantity} | link: ${run.link}`);
 
-            {/* Overall Stats */}
-            <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-3">
-              <div className="rounded-lg bg-gray-900 px-3 py-2 text-center">
-                <p className="text-xl font-bold text-yellow-400">
-                  {group.linksCount}
-                </p>
-                <p className="text-[10px] text-gray-500">Total Links</p>
-              </div>
-              <div className="rounded-lg bg-gray-900 px-3 py-2 text-center">
-                <p className="text-xl font-bold text-yellow-400">
-                  {(group.totalViews / 1000).toFixed(0)}k
-                </p>
-                <p className="text-[10px] text-gray-500">Total Views</p>
-              </div>
-              <div className="rounded-lg bg-gray-900 px-3 py-2 text-center">
-                <p className="text-xl font-bold text-blue-400">
-                  {totalRunsInBatch}
-                </p>
-                <p className="text-[10px] text-gray-500">Total Runs</p>
-              </div>
-              <div className="rounded-lg bg-gray-900 px-3 py-2 text-center">
-                <p
-                  className={`text-xl font-bold ${isCancelled ? "text-red-400" : "text-emerald-400"}`}
-                >
-                  {overallProgress.percent}%
-                </p>
-                <p className="text-[10px] text-gray-500">Progress</p>
-              </div>
-              <div className="rounded-lg bg-gray-900 px-3 py-2 text-center">
-                <StatusBadge status={overallStatus} />
-              </div>
-            </div>
-
-            {/* Status Summary */}
-            <div className="mt-3 flex flex-wrap gap-2">
-              {Object.entries(statusCounts).map(([status, count]) => (
-                <div key={status} className="flex items-center gap-1 text-xs">
-                  <span
-                    className={`h-2 w-2 rounded-full ${STATUS_COLORS[status]?.dot || "bg-gray-500"}`}
-                  />
-                  <span className="text-gray-400">
-                    {count} {status}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {/* Bulk Actions */}
-            {!isCancelled && (
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  onClick={() => {
-                    const runningCount = group.orders.filter(
-                      (o) => getRealStatus(o) === "running"
-                    ).length;
-                    if (
-                      runningCount > 0 &&
-                      window.confirm(`Pause ALL ${runningCount} running orders?`)
-                    ) {
-                      group.orders.forEach((order) => {
-                        if (getRealStatus(order) === "running") {
-                          onControlOrder(order, "pause");
-                        }
-                      });
-                    }
-                  }}
-                  className="flex items-center gap-1 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-1.5 text-xs font-medium text-orange-300 hover:bg-orange-500/20 transition"
-                >
-                  ⏸️ Pause All Running
-                </button>
-                <button
-                  onClick={() => {
-                    const pausedCount = group.orders.filter(
-                      (o) => getRealStatus(o) === "paused"
-                    ).length;
-                    if (
-                      pausedCount > 0 &&
-                      window.confirm(`Resume ALL ${pausedCount} paused orders?`)
-                    ) {
-                      group.orders.forEach((order) => {
-                        if (getRealStatus(order) === "paused") {
-                          onControlOrder(order, "resume");
-                        }
-                      });
-                    }
-                  }}
-                  className="flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 transition"
-                >
-                  ▶️ Resume All Paused
-                </button>
-                <button
-                  onClick={() => {
-                    const activeCount = group.orders.filter(
-                      (o) =>
-                        !["completed", "cancelled", "failed"].includes(
-                          getRealStatus(o)
-                        )
-                    ).length;
-                    if (
-                      activeCount > 0 &&
-                      window.confirm(
-                        `⚠️ Cancel ALL ${activeCount} active orders?\n\nThis cannot be undone!`
-                      )
-                    ) {
-                      group.orders.forEach((order) => {
-                        const status = getRealStatus(order);
-                        if (
-                          status !== "completed" &&
-                          status !== "cancelled" &&
-                          status !== "failed"
-                        ) {
-                          onControlOrder(order, "cancel");
-                        }
-                      });
-                    }
-                  }}
-                  className="flex items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/20 transition"
-                >
-                  ❌ Cancel All Active
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Individual Links List */}
-          <div className="flex-1 overflow-y-auto p-5">
-            <h4 className="text-sm font-semibold text-gray-400 mb-3">
-              📋 Individual Links ({group.orders.length})
-            </h4>
-            <div className="space-y-3">
-              {group.orders.map((order, index) => (
-                <IndividualLinkCard
-                  key={order.id}
-                  order={order}
-                  index={index}
-                />
-              ))}
-            </div>
-          </div>
-        </motion.div>
-      </div>
+    // Mark as processing
+    await Run.updateOne(
+      { _id: run._id },
+      { $set: { status: 'processing', executedAt: new Date() } }
     );
+
+    // Build payload
+    const payload = {
+      apiUrl:   run.apiUrl,
+      apiKey:   run.apiKey,
+      service:  run.service,
+      link:     run.link,
+      quantity: run.quantity,
+      comments: run.label === 'COMMENTS' ? run.comments : null,
+    };
+
+    const result = await placeOrder(payload);
+
+    if (result?.order) {
+      console.log(`[${run.label}] ✅ SUCCESS - SMM Order ID: ${result.order}`);
+      await Run.updateOne(
+        { _id: run._id },
+        {
+          $set: {
+            done:      true,
+            status:    'completed',
+            smmOrderId: result.order,
+            error:     null,
+          },
+        }
+      );
+    } else {
+      const errorMsg = result?.error || 'Unknown provider error';
+      console.error(`[${run.label}] ❌ FAILED - Provider response:`, result);
+
+      // 🔥 Provider busy → retry in 5 min
+      if (
+        errorMsg.toLowerCase().includes('active order') ||
+        errorMsg.toLowerCase().includes('wait until') ||
+        errorMsg.toLowerCase().includes('in progress')
+      ) {
+        console.log(`[${run.label}] Provider busy → retry in 5 min`);
+        await Run.updateOne(
+          { _id: run._id },
+          {
+            $set: {
+              status: 'pending',
+              error:  null,
+              time:   new Date(Date.now() + 5 * 60 * 1000),
+            },
+          }
+        );
+      } else {
+        await Run.updateOne(
+          { _id: run._id },
+          { $set: { status: 'failed', error: errorMsg } }
+        );
+      }
+    }
+  } catch (err) {
+    const errorMsg = err.response?.data?.error || err.message || 'Unknown error';
+    console.error(`[${run.label}] ❌ ERROR run #${run.id}:`, errorMsg);
+
+    if (!run._id) return;
+
+    // 🔥 Provider busy in catch block too
+    if (
+      errorMsg.toLowerCase().includes('active order') ||
+      errorMsg.toLowerCase().includes('wait until') ||
+      errorMsg.toLowerCase().includes('in progress')
+    ) {
+      console.log(`[${run.label}] Provider busy (catch) → retry in 5 min`);
+      await Run.updateOne(
+        { _id: run._id },
+        {
+          $set: {
+            status: 'pending',
+            error:  null,
+            time:   new Date(Date.now() + 5 * 60 * 1000),
+          },
+        }
+      );
+    } else {
+      await Run.updateOne(
+        { _id: run._id },
+        { $set: { status: 'failed', error: errorMsg } }
+      );
+    }
   }
 
-  // Single Order Popup
-  function SingleOrderPopup({ order }: { order: CreatedOrder }) {
-    const [showRuns, setShowRuns] = useState(false);
-    const status = getRealStatus(order);
-    const progress = getProgress(order);
-    const isControlling = controllingOrderId === order.id;
-    const isCancelled = status === "cancelled" || status === "failed";
-    const hasBackendRuns = order.backendRuns && order.backendRuns.length > 0;
-
-    return (
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm px-4 py-6"
-        onClick={() => setOpenedGroupId(null)}
-      >
-        <div
-          className="max-h-[92vh] w-full max-w-4xl overflow-auto rounded-2xl border border-yellow-500/30 bg-black shadow-2xl flex flex-col"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="border-b border-gray-800 px-5 py-4 flex-shrink-0">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-yellow-400">
-                  {order.name || "Mission Details"}
-                </h3>
-                <p className="mt-0.5 text-xs text-gray-600 font-mono">{order.id}</p>
-                {order.schedulerOrderId && (
-                  <p className="text-[10px] text-gray-700 font-mono">
-                    Backend: {order.schedulerOrderId}
-                  </p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setOpenedGroupId(null)}
-                className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-300 transition hover:bg-yellow-500/20"
-              >
-                ✕ Close
-              </button>
-            </div>
-
-            {/* Stats Row */}
-            <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="rounded-lg bg-gray-900 px-3 py-2 text-center">
-                <p className="text-lg font-bold text-yellow-400">
-                  {(order.totalViews / 1000).toFixed(0)}k
-                </p>
-                <p className="text-[10px] text-gray-500">Views</p>
-              </div>
-              <div className="rounded-lg bg-gray-900 px-3 py-2 text-center">
-                <p className="text-lg font-bold text-white">
-                  {progress.completed}/{progress.total}
-                </p>
-                <p className="text-[10px] text-gray-500">Runs</p>
-              </div>
-              <div className="rounded-lg bg-gray-900 px-3 py-2 text-center">
-                <p className="text-lg font-bold text-emerald-400">
-                  {progress.percent}%
-                </p>
-                <p className="text-[10px] text-gray-500">Progress</p>
-              </div>
-              <div className="rounded-lg bg-gray-900 px-3 py-2 text-center">
-                <StatusBadge status={status} />
-              </div>
-            </div>
-
-            {/* Engagement Row */}
-            <div className="mt-3 grid grid-cols-4 gap-2">
-              <div className="rounded-md bg-black/50 px-2 py-1 text-center">
-                <p className="text-xs font-medium text-pink-400">
-                  {order.engagement.likes}
-                </p>
-                <p className="text-[9px] text-gray-600">Likes</p>
-              </div>
-              <div className="rounded-md bg-black/50 px-2 py-1 text-center">
-                <p className="text-xs font-medium text-blue-400">
-                  {order.engagement.shares}
-                </p>
-                <p className="text-[9px] text-gray-600">Shares</p>
-              </div>
-              <div className="rounded-md bg-black/50 px-2 py-1 text-center">
-                <p className="text-xs font-medium text-purple-400">
-                  {order.engagement.saves}
-                </p>
-                <p className="text-[9px] text-gray-600">Saves</p>
-              </div>
-              <div className="rounded-md bg-black/50 px-2 py-1 text-center">
-                <p className="text-xs font-medium text-green-400">
-                  {order.engagement.comments || 0}
-                </p>
-                <p className="text-[9px] text-gray-600">Comments</p>
-              </div>
-            </div>
-
-            {/* Progress Bar */}
-            <div className="mt-3">
-              <ProgressBar percent={progress.percent} />
-            </div>
-
-            {/* Controls */}
-            <div className="mt-4 flex flex-wrap gap-2">
-              {!isCancelled && status === "running" && (
-                <button
-                  onClick={() => onControlOrder(order, "pause")}
-                  disabled={isControlling}
-                  className="flex items-center gap-1 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-1.5 text-xs font-medium text-orange-300 hover:bg-orange-500/20 transition disabled:opacity-50"
-                >
-                  {isControlling ? "⏳" : "⏸️"} Pause
-                </button>
-              )}
-              {!isCancelled && status === "paused" && (
-                <button
-                  onClick={() => onControlOrder(order, "resume")}
-                  disabled={isControlling}
-                  className="flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 transition disabled:opacity-50"
-                >
-                  {isControlling ? "⏳" : "▶️"} Resume
-                </button>
-              )}
-              {!isCancelled && status !== "completed" && (
-                <button
-                  onClick={() => {
-                    if (window.confirm("Cancel this mission?")) {
-                      onControlOrder(order, "cancel");
-                    }
-                  }}
-                  disabled={isControlling}
-                  className="flex items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/20 transition disabled:opacity-50"
-                >
-                  {isControlling ? "⏳" : "❌"} Cancel
-                </button>
-              )}
-              <button
-                onClick={() => onCloneOrder(order)}
-                className="flex items-center gap-1 rounded-lg border border-gray-600 bg-black px-3 py-1.5 text-xs font-medium text-gray-400 hover:text-white transition"
-              >
-                📋 Clone Mission
-              </button>
-              <a
-                href={order.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 rounded-lg border border-gray-600 bg-black px-3 py-1.5 text-xs font-medium text-gray-400 hover:text-white transition"
-              >
-                🔗 Open Link
-              </a>
-              <button
-                onClick={() => setShowRuns(!showRuns)}
-                className={`flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition ml-auto ${
-                  showRuns
-                    ? "border-yellow-500/50 bg-yellow-500/20 text-yellow-300"
-                    : "border-yellow-500/30 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20"
-                }`}
-              >
-                {showRuns ? "🔼 Hide Runs" : `📋 View Runs`}
-              </button>
-            </div>
-          </div>
-
-          {/* Run Table */}
-          <div className="flex-1 overflow-y-auto p-5">
-            <AnimatePresence>
-              {showRuns && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="rounded-lg border border-yellow-500/20 bg-black/50 p-3">
-                    <div className="flex items-center justify-between mb-3">
-                      <h4 className="text-xs font-semibold text-yellow-400">
-                        📋 Run Schedule
-                        {hasBackendRuns && (
-                          <span className="ml-2 text-[9px] text-emerald-400">
-                            ✅ Live from backend
-                          </span>
-                        )}
-                      </h4>
-                    </div>
-                    {hasBackendRuns ? (
-                      <BackendRunTable runs={order.backendRuns!} />
-                    ) : order.runs && order.runs.length > 0 ? (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-[10px]">
-                          <thead>
-                            <tr className="border-b border-gray-800 text-gray-600 uppercase tracking-wider">
-                              <th className="pb-2 pr-3">#</th>
-                              <th className="pb-2 pr-3">Scheduled Time</th>
-                              <th className="pb-2 pr-3">Views</th>
-                              <th className="pb-2 pr-3">Likes</th>
-                              <th className="pb-2 pr-3">Shares</th>
-                              <th className="pb-2 pr-3">Saves</th>
-                              <th className="pb-2">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-900">
-                            {order.runs.map((run, i) => {
-                              const runTime =
-                                run.at instanceof Date
-                                  ? run.at
-                                  : new Date(run.at);
-                              const isPast = runTime.getTime() <= Date.now();
-                              const runStatus =
-                                order.runStatuses?.[i] || "pending";
-                              return (
-                                <tr key={i} className="hover:bg-gray-900/50">
-                                  <td className="py-1.5 pr-3 text-gray-500">
-                                    {i + 1}
-                                  </td>
-                                  <td className="py-1.5 pr-3 text-gray-400">
-                                    {runTime.toLocaleDateString()}{" "}
-                                    {runTime.toLocaleTimeString([], {
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    })}
-                                  </td>
-                                  <td className="py-1.5 pr-3 text-yellow-400">
-                                    {(run.views || 0).toLocaleString()}
-                                  </td>
-                                  <td className="py-1.5 pr-3 text-pink-400">
-                                    {run.likes || 0}
-                                  </td>
-                                  <td className="py-1.5 pr-3 text-blue-400">
-                                    {run.shares || 0}
-                                  </td>
-                                  <td className="py-1.5 pr-3 text-purple-400">
-                                    {run.saves || 0}
-                                  </td>
-                                  <td className="py-1.5">
-                                    {runStatus === "completed" ? (
-                                      <span className="text-emerald-400">✅</span>
-                                    ) : runStatus === "cancelled" ? (
-                                      <span className="text-red-400">🚫</span>
-                                    ) : isPast ? (
-                                      <span className="text-yellow-400">⚡</span>
-                                    ) : (
-                                      <span className="text-gray-500">🕐</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-dashed border-gray-700 p-4 text-center">
-                        <p className="text-xs text-gray-500">
-                          No run data available. Sync will populate this.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Order metadata */}
-            <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-gray-500">
-              <div>
-                <span className="text-gray-600">API: </span>
-                <span>{order.selectedAPI}</span>
-              </div>
-              <div>
-                <span className="text-gray-600">Bundle: </span>
-                <span>{order.selectedBundle}</span>
-              </div>
-              <div>
-                <span className="text-gray-600">Pattern: </span>
-                <span>{order.patternName}</span>
-              </div>
-              <div>
-                <span className="text-gray-600">Created: </span>
-                <span>
-                  {new Date(order.createdAt).toLocaleDateString()}{" "}
-                  {new Date(order.createdAt).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mx-auto max-w-7xl space-y-6 px-6 py-8">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">📦</span>
-            <h2 className="text-2xl font-bold tracking-tight text-yellow-400">
-              Mission Control
-            </h2>
-          </div>
-          <p className="mt-1 text-sm text-gray-600">
-            Track and manage all your operations
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-gray-600">
-          <span className="inline-flex h-2 w-2 rounded-full bg-yellow-400 animate-pulse" />
-          <span>Live monitoring</span>
-        </div>
-      </div>
-
-      {/* Stats Summary */}
-      <StatsSummary />
-
-      {/* Notice */}
-      {notice && (
-        <div className="flex items-center justify-between rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
-          <div className="flex items-center gap-2">
-            <span>✓</span>
-            <p>{notice}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onDismissNotice}
-            className="rounded-lg px-2 py-1 text-emerald-200 hover:bg-emerald-500/20 transition"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/* Tabs & Controls */}
-      <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap gap-2">
-            {TABS.map((tab) => {
-              const count = categorizedGroups[tab.key].length;
-              const isActive = activeTab === tab.key;
-              const isCancelledTab = tab.key === "cancelled";
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setActiveTab(tab.key)}
-                  className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
-                    isActive
-                      ? isCancelledTab
-                        ? "bg-red-500/20 text-red-300 shadow-lg shadow-red-500/10"
-                        : "bg-yellow-500/20 text-yellow-300 shadow-lg shadow-yellow-500/10"
-                      : "text-gray-500 hover:bg-yellow-500/10 hover:text-yellow-400"
-                  }`}
-                >
-                  <span>{tab.icon}</span>
-                  <span>{tab.label}</span>
-                  <span
-                    className={`ml-1 rounded-full px-2 py-0.5 text-xs ${
-                      isActive
-                        ? isCancelledTab
-                          ? "bg-red-500/30 text-red-100"
-                          : "bg-yellow-500/30 text-yellow-100"
-                        : "bg-gray-800 text-gray-500"
-                    }`}
-                  >
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 min-w-[240px]">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600">
-                🔍
-              </span>
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search missions..."
-                className="w-full rounded-lg border border-yellow-500/30 bg-black py-2.5 pl-10 pr-4 text-sm text-gray-100 outline-none ring-yellow-500/40 transition placeholder:text-gray-700 focus:border-yellow-500/50 focus:ring-2"
-              />
-              {query && (
-                <button
-                  type="button"
-                  onClick={() => setQuery("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-
-            <div className="inline-flex rounded-lg border border-yellow-500/30 bg-black p-1">
-              <button
-                type="button"
-                onClick={() => setViewMode("rows")}
-                className={`rounded-md px-3 py-2 text-xs transition ${
-                  viewMode === "rows"
-                    ? "bg-yellow-500/20 text-yellow-300"
-                    : "text-gray-500 hover:text-yellow-400"
-                }`}
-                title="Table View"
-              >
-                ☰ Rows
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("columns")}
-                className={`rounded-md px-3 py-2 text-xs transition ${
-                  viewMode === "columns"
-                    ? "bg-yellow-500/20 text-yellow-300"
-                    : "text-gray-500 hover:text-yellow-400"
-                }`}
-                title="Grid View"
-              >
-                ⊞ Grid
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Results Info */}
-      {query && (
-        <p className="text-sm text-gray-600">
-          Found{" "}
-          <span className="text-gray-400 font-medium">{filteredGroups.length}</span>{" "}
-          missions matching "
-          <span className="text-yellow-400">{query}</span>" in {activeTab}
-        </p>
-      )}
-
-      {/* Orders Display */}
-      {filteredGroups.length === 0 ? (
-        <EmptyState tab={activeTab} />
-      ) : viewMode === "rows" ? (
-        <div className="overflow-hidden rounded-xl border border-yellow-500/20 bg-black">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-gray-400">
-              <thead className="bg-gray-900 text-gray-500 uppercase tracking-wider">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Mission</th>
-                  <th className="px-4 py-3 font-medium">Link(s)</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 font-medium">Progress</th>
-                  <th className="px-4 py-3 font-medium">
-                    {activeTab === "cancelled" ? "Cancelled" : "Deployed"}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredGroups.map((group) => (
-                  <GroupTableRow key={group.id} group={group} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filteredGroups.map((group) => (
-            <GroupCardItem key={group.id} group={group} />
-          ))}
-        </div>
-      )}
-
-      {/* Detail Popup */}
-      <AnimatePresence>
-        {openedGroup &&
-          (openedGroup.isBatch ? (
-            <BatchDetailPopup group={openedGroup} />
-          ) : (
-            <SingleOrderPopup order={openedGroup.orders[0]} />
-          ))}
-      </AnimatePresence>
-    </div>
-  );
+  // 🔥 FIXED: Only one updateOrderStatus call - at the very end
+  await updateOrderStatus(run.schedulerOrderId);
 }
+
+/* =========================
+   🔥 UNIFIED QUEUE PROCESSOR
+   Single factory function replaces
+   5 identical duplicate processors
+========================= */
+function createQueueProcessor(label, getQueue, getFlag, setFlag) {
+  return async function processQueue() {
+    const queue = getQueue();
+
+    if (getFlag() || queue.length === 0) return;
+
+    setFlag(true);
+    const run = queue.shift();
+
+    console.log(`[${label} QUEUE] Processing run #${run.id} | Remaining: ${queue.length}`);
+
+    try {
+      const cooldownKey   = `${run.link}-${label}`;
+      const lastExec      = lastExecutionTime.get(cooldownKey) || 0;
+      const timeSinceLast = Date.now() - lastExec;
+
+      if (timeSinceLast < MIN_COOLDOWN_MS) {
+        const waitMs = MIN_COOLDOWN_MS - timeSinceLast;
+        console.log(`[${label} QUEUE] Cooldown active, ${Math.round(waitMs / 1000)}s remaining`);
+
+        // 🔥 FIXED: Put run back, release flag, schedule retry
+        // Do NOT sleep here - just schedule a future check
+        queue.unshift(run);
+        setFlag(false);
+
+        // Schedule next attempt after cooldown
+        const retryAfter = Math.min(waitMs, 5 * 60 * 1000); // max 5 min wait
+        setTimeout(() => {
+          if (queue.length > 0 && !getFlag()) {
+            processQueue();
+          }
+        }, retryAfter);
+        return;
+      }
+
+      // 🔥 Fetch fresh run from DB to get latest status
+      const freshRun = await Run.findById(run._id).lean();
+
+      if (!freshRun) {
+        console.log(`[${label} QUEUE] Run not found in DB, skipping`);
+      } else if (freshRun.status === 'cancelled' || freshRun.status === 'completed' || freshRun.status === 'failed') {
+        console.log(`[${label} QUEUE] Run #${run.id} is ${freshRun.status}, skipping`);
+      } else {
+        lastExecutionTime.set(cooldownKey, Date.now());
+        // 🔥 Pass freshRun to executeRun for latest state
+        await executeRun({ ...freshRun, _id: freshRun._id });
+      }
+    } catch (err) {
+      console.error(`[${label} QUEUE] Unexpected error:`, err.message);
+    }
+
+    setFlag(false);
+
+    // 🔥 FIXED: Small delay between runs (2s) then continue queue
+    // Much shorter than 8s, prevents double-start issue
+    if (queue.length > 0) {
+      setTimeout(() => {
+        if (!getFlag()) processQueue();
+      }, 2000);
+    }
+  };
+}
+
+// 🔥 Create the 5 processors using factory
+const processViewsQueue = createQueueProcessor(
+  'VIEWS',
+  () => viewsQueue,
+  () => isExecuting.VIEWS,
+  (v) => { isExecuting.VIEWS = v; }
+);
+
+const processLikesQueue = createQueueProcessor(
+  'LIKES',
+  () => likesQueue,
+  () => isExecuting.LIKES,
+  (v) => { isExecuting.LIKES = v; }
+);
+
+const processSharesQueue = createQueueProcessor(
+  'SHARES',
+  () => sharesQueue,
+  () => isExecuting.SHARES,
+  (v) => { isExecuting.SHARES = v; }
+);
+
+const processSavesQueue = createQueueProcessor(
+  'SAVES',
+  () => savesQueue,
+  () => isExecuting.SAVES,
+  (v) => { isExecuting.SAVES = v; }
+);
+
+const processCommentsQueue = createQueueProcessor(
+  'COMMENTS',
+  () => commentsQueue,
+  () => isExecuting.COMMENTS,
+  (v) => { isExecuting.COMMENTS = v; }
+);
+
+/* =========================
+   🔥 CHECK IF RUN IN QUEUE
+========================= */
+function isRunInQueue(runId) {
+  // 🔥 FIXED: Compare as same type (Number)
+  const id = Number(runId);
+  return viewsQueue.some(r    => Number(r.id) === id) ||
+         likesQueue.some(r    => Number(r.id) === id) ||
+         sharesQueue.some(r   => Number(r.id) === id) ||
+         savesQueue.some(r    => Number(r.id) === id) ||
+         commentsQueue.some(r => Number(r.id) === id);
+}
+
+/* =========================
+   🔥 REMOVE RUN FROM ALL QUEUES
+========================= */
+function removeFromAllQueues(runId) {
+  const id     = Number(runId);
+  const filter = r => Number(r.id) !== id;
+  viewsQueue    = viewsQueue.filter(filter);
+  likesQueue    = likesQueue.filter(filter);
+  sharesQueue   = sharesQueue.filter(filter);
+  savesQueue    = savesQueue.filter(filter);
+  commentsQueue = commentsQueue.filter(filter);
+}
+
+/* =========================
+   🔥 REMOVE ORDER FROM ALL QUEUES
+========================= */
+function removeOrderFromAllQueues(schedulerOrderId) {
+  const filter  = r => r.schedulerOrderId !== schedulerOrderId;
+  viewsQueue    = viewsQueue.filter(filter);
+  likesQueue    = likesQueue.filter(filter);
+  sharesQueue   = sharesQueue.filter(filter);
+  savesQueue    = savesQueue.filter(filter);
+  commentsQueue = commentsQueue.filter(filter);
+}
+
+/* =========================
+   🔥 MAIN SCHEDULER (every 10s)
+========================= */
+mongoose.connection.once('open', () => {
+  console.log('🚀 Scheduler started after DB connected');
+
+  // 🔥 Periodic stuck run cleanup (every 15 min)
+  // FIXED: Moved OUT of executeRun - was firing on every single run execution
+  setInterval(async () => {
+    try {
+      const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000);
+      const result = await Run.updateMany(
+        {
+          status:    'processing',
+          executedAt: null,
+          createdAt: { $lt: fifteenMinAgo },
+        },
+        { $set: { status: 'pending', error: null } }
+      );
+      if (result.modifiedCount > 0) {
+        console.log(`[CLEANUP] Reset ${result.modifiedCount} stuck processing runs`);
+      }
+    } catch (err) {
+      console.error('[CLEANUP] Error:', err.message);
+    }
+  }, 15 * 60 * 1000); // Every 15 minutes
+
+  // 🔥 Main scheduler tick
+  setInterval(async () => {
+    try {
+      const now = new Date();
+      let addedToQueue = { views: 0, likes: 0, shares: 0, saves: 0, comments: 0 };
+
+      // 🔥 FIXED: Only fetch pending runs that are due NOW
+      // No longer fetches ALL runs then filters - much more efficient
+      const pendingRuns = await Run.find({
+        done:   false,
+        status: 'pending',
+        time:   { $lte: now },
+      })
+      .limit(50) // 🔥 Safety limit - process max 50 per tick
+      .lean();
+
+      if (pendingRuns.length === 0) return;
+
+      // 🔥 FIXED: Batch fetch all related orders in ONE query
+      // Instead of N individual Order.findOne calls inside loop
+      const uniqueOrderIds = [...new Set(pendingRuns.map(r => r.schedulerOrderId))];
+      const activeOrders   = await Order.find(
+        { schedulerOrderId: { $in: uniqueOrderIds } },
+        { schedulerOrderId: 1, status: 1 }
+      ).lean();
+
+      // Build a lookup map for O(1) access
+      const orderStatusMap = new Map(
+        activeOrders.map(o => [o.schedulerOrderId, o.status])
+      );
+
+      const runsToMarkQueued = [];
+
+      for (const run of pendingRuns) {
+        // 🔥 Skip if already in memory queue
+        if (isRunInQueue(run.id)) continue;
+
+        const orderStatus = orderStatusMap.get(run.schedulerOrderId);
+
+        // 🔥 Skip if order doesn't exist or is inactive
+        if (!orderStatus || orderStatus === 'cancelled' || orderStatus === 'paused') {
+          if (orderStatus === 'cancelled') {
+            // Mark the run cancelled too
+            runsToMarkQueued.push({ id: run._id, newStatus: 'cancelled' });
+          }
+          continue;
+        }
+
+        // 🔥 Add to appropriate queue
+        const pushed = pushToQueue(run);
+        if (!pushed) continue;
+
+        runsToMarkQueued.push({ id: run._id, newStatus: 'queued' });
+
+        if (run.label === 'VIEWS')    { addedToQueue.views++;    console.log(`[SCHEDULER] VIEWS run #${run.id} → queue (qty: ${run.quantity})`); }
+        if (run.label === 'LIKES')    { addedToQueue.likes++;    console.log(`[SCHEDULER] LIKES run #${run.id} → queue (qty: ${run.quantity})`); }
+        if (run.label === 'SHARES')   { addedToQueue.shares++;   console.log(`[SCHEDULER] SHARES run #${run.id} → queue (qty: ${run.quantity})`); }
+        if (run.label === 'SAVES')    { addedToQueue.saves++;    console.log(`[SCHEDULER] SAVES run #${run.id} → queue (qty: ${run.quantity})`); }
+        if (run.label === 'COMMENTS') { addedToQueue.comments++; console.log(`[SCHEDULER] COMMENTS run #${run.id} → queue (qty: ${run.quantity})`); }
+      }
+
+      // 🔥 FIXED: Batch update all status changes in bulk ops instead of N individual saves
+      if (runsToMarkQueued.length > 0) {
+        const bulkOps = runsToMarkQueued.map(item => ({
+          updateOne: {
+            filter: { _id: item.id },
+            update: { $set: { status: item.newStatus } },
+          },
+        }));
+        await Run.bulkWrite(bulkOps);
+      }
+
+      const totalAdded = Object.values(addedToQueue).reduce((a, b) => a + b, 0);
+      if (totalAdded > 0) {
+        console.log(`[SCHEDULER] Queued → Views:${addedToQueue.views} Likes:${addedToQueue.likes} Shares:${addedToQueue.shares} Saves:${addedToQueue.saves} Comments:${addedToQueue.comments}`);
+      }
+
+      // 🔥 Trigger queue processors
+      if (viewsQueue.length > 0    && !isExecuting.VIEWS)    processViewsQueue();
+      if (likesQueue.length > 0    && !isExecuting.LIKES)    processLikesQueue();
+      if (sharesQueue.length > 0   && !isExecuting.SHARES)   processSharesQueue();
+      if (savesQueue.length > 0    && !isExecuting.SAVES)    processSavesQueue();
+      if (commentsQueue.length > 0 && !isExecuting.COMMENTS) processCommentsQueue();
+
+    } catch (error) {
+      console.error('[SCHEDULER] Error:', error.message);
+    }
+  }, 10000);
+});
+
+/* =========================
+   🔥 API: CREATE ORDER
+========================= */
+app.post('/api/order', async (req, res) => {
+  try {
+    const { apiUrl, apiKey, link, services, name } = req.body;
+
+    if (!apiUrl || !apiKey || !link || !services) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    console.log('[CREATE ORDER] Services received:', JSON.stringify(services, null, 2));
+
+    const schedulerOrderId = `sched-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const runsForOrder     = await addRuns(services, { apiUrl, apiKey, link }, schedulerOrderId);
+
+    if (runsForOrder.length === 0) {
+      return res.status(400).json({ error: 'No valid runs could be created from provided services' });
+    }
+
+    const orderData = new Order({
+      schedulerOrderId,
+      name:         name || `Order ${schedulerOrderId}`,
+      link,
+      status:       'pending',
+      totalRuns:    runsForOrder.length,
+      completedRuns: 0,
+      runStatuses:  runsForOrder.map(() => 'pending'),
+      createdAt:    new Date(),
+      lastUpdatedAt: new Date(),
+    });
+
+    await orderData.save();
+
+    console.log(`[CREATE ORDER] ✅ Created ${schedulerOrderId} with ${runsForOrder.length} runs`);
+
+    return res.json({
+      success:          true,
+      message:          'Order scheduled',
+      schedulerOrderId,
+      status:           'pending',
+      completedRuns:    0,
+      totalRuns:        runsForOrder.length,
+    });
+  } catch (error) {
+    console.error('[CREATE ORDER] Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/* =========================
+   🔥 API: FETCH SMM SERVICES
+========================= */
+app.post('/api/services', async (req, res) => {
+  const { apiUrl, apiKey } = req.body;
+  if (!apiUrl || !apiKey) {
+    return res.status(400).json({ error: 'Missing API URL or key' });
+  }
+  try {
+    const params   = new URLSearchParams({ key: apiKey, action: 'services' });
+    const response = await axios.post(apiUrl, params.toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 30000,
+    });
+    return res.json(response.data);
+  } catch (error) {
+    return res.status(500).json({ error: error.response?.data || error.message });
+  }
+});
+
+/* =========================
+   🔥 API: GET SINGLE ORDER STATUS
+========================= */
+app.get('/api/order/status/:schedulerOrderId', async (req, res) => {
+  try {
+    const { schedulerOrderId } = req.params;
+
+    // 🔥 Parallel fetch for speed
+    const [order, orderRuns] = await Promise.all([
+      Order.findOne({ schedulerOrderId }).lean(),
+      Run.find({ schedulerOrderId }).lean(),
+    ]);
+
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    return res.json({
+      schedulerOrderId: order.schedulerOrderId,
+      name:             order.name,
+      link:             order.link,
+      status:           order.status,
+      totalRuns:        order.totalRuns,
+      completedRuns:    order.completedRuns,
+      runStatuses:      order.runStatuses,
+      createdAt:        order.createdAt,
+      lastUpdatedAt:    order.lastUpdatedAt,
+      runs: orderRuns.map(r => ({
+        id:          r.id,
+        label:       r.label,
+        quantity:    r.quantity,
+        time:        r.time,
+        status:      r.status,
+        smmOrderId:  r.smmOrderId,
+        executedAt:  r.executedAt,
+        error:       r.error,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/* =========================
+   🔥 API: GET ALL ORDERS STATUS
+========================= */
+app.get('/api/orders/status', async (req, res) => {
+  try {
+    // 🔥 FIXED: Use aggregation instead of N+1 queries
+    // Fetch all orders first
+    const allOrders = await Order.find()
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (allOrders.length === 0) {
+      return res.json({ total: 0, orders: [] });
+    }
+
+    // 🔥 Fetch ALL runs for ALL orders in ONE query
+    const allOrderIds = allOrders.map(o => o.schedulerOrderId);
+    const allRuns     = await Run.find(
+      { schedulerOrderId: { $in: allOrderIds } },
+      { id: 1, label: 1, quantity: 1, time: 1, status: 1, smmOrderId: 1, schedulerOrderId: 1 }
+    ).lean();
+
+    // 🔥 Group runs by schedulerOrderId using Map for O(1) lookup
+    const runsByOrder = new Map();
+    for (const run of allRuns) {
+      if (!runsByOrder.has(run.schedulerOrderId)) {
+        runsByOrder.set(run.schedulerOrderId, []);
+      }
+      runsByOrder.get(run.schedulerOrderId).push(run);
+    }
+
+    const ordersWithRuns = allOrders.map(order => ({
+      schedulerOrderId: order.schedulerOrderId,
+      name:             order.name,
+      link:             order.link,
+      status:           order.status,
+      totalRuns:        order.totalRuns,
+      completedRuns:    order.completedRuns,
+      runStatuses:      order.runStatuses,
+      createdAt:        order.createdAt,
+      lastUpdatedAt:    order.lastUpdatedAt,
+      runs: (runsByOrder.get(order.schedulerOrderId) || []).map(r => ({
+        id:         r.id,
+        label:      r.label,
+        quantity:   r.quantity,
+        time:       r.time,
+        status:     r.status,
+        smmOrderId: r.smmOrderId,
+      })),
+    }));
+
+    return res.json({ total: allOrders.length, orders: ordersWithRuns });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/* =========================
+   🔥 API: ORDER CONTROL
+   (cancel / pause / resume)
+========================= */
+app.post('/api/order/control', async (req, res) => {
+  try {
+    const { schedulerOrderId, action } = req.body;
+
+    if (!schedulerOrderId || !action) {
+      return res.status(400).json({ error: 'Missing schedulerOrderId or action' });
+    }
+
+    const order = await Order.findOne({ schedulerOrderId });
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    if (action === 'cancel') {
+      // 🔥 FIXED: Single bulkWrite instead of N individual saves
+      await Run.updateMany(
+        {
+          schedulerOrderId,
+          status: { $in: ['pending', 'processing', 'queued', 'paused'] },
+        },
+        { $set: { status: 'cancelled', done: true } }
+      );
+
+      // 🔥 FIXED: Remove entire order from all queues in one shot
+      removeOrderFromAllQueues(schedulerOrderId);
+
+      order.status = 'cancelled';
+      await order.save();
+
+      // Fetch updated runs for response
+      const updatedRuns = await Run.find({ schedulerOrderId }, { status: 1 }).lean();
+
+      return res.json({
+        success:      true,
+        status:       'cancelled',
+        completedRuns: updatedRuns.filter(r => r.status === 'completed').length,
+        runStatuses:  updatedRuns.map(r => r.status),
+      });
+    }
+
+    if (action === 'pause') {
+      // 🔥 FIXED: Single DB call
+      await Run.updateMany(
+        {
+          schedulerOrderId,
+          status: { $in: ['pending', 'queued'] },
+        },
+        { $set: { status: 'paused' } }
+      );
+
+      // 🔥 Remove from all queues
+      removeOrderFromAllQueues(schedulerOrderId);
+
+      order.status = 'paused';
+      await order.save();
+
+      const updatedRuns = await Run.find({ schedulerOrderId }, { status: 1 }).lean();
+
+      return res.json({
+        success:      true,
+        status:       'paused',
+        completedRuns: updatedRuns.filter(r => r.status === 'completed').length,
+        runStatuses:  updatedRuns.map(r => r.status),
+      });
+    }
+
+    if (action === 'resume') {
+      // 🔥 Reset all paused runs back to pending
+      await Run.updateMany(
+        { schedulerOrderId, status: 'paused' },
+        { $set: { status: 'pending' } }
+      );
+
+      order.status = 'running';
+      await order.save();
+
+      const updatedRuns = await Run.find({ schedulerOrderId }, { status: 1 }).lean();
+
+      return res.json({
+        success:      true,
+        status:       'running',
+        completedRuns: updatedRuns.filter(r => r.status === 'completed').length,
+        runStatuses:  updatedRuns.map(r => r.status),
+      });
+    }
+
+    return res.status(400).json({ error: 'Invalid action. Use: cancel, pause, resume' });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/* =========================
+   🔥 API: GET ORDER RUNS
+========================= */
+app.get('/api/order/runs/:schedulerOrderId', async (req, res) => {
+  try {
+    const { schedulerOrderId } = req.params;
+    const orderRuns = await Run.find({ schedulerOrderId }).lean();
+
+    return res.json({
+      schedulerOrderId,
+      runs: orderRuns.map(r => ({
+        id:         r.id,
+        label:      r.label,
+        quantity:   r.quantity,
+        time:       r.time,
+        status:     r.status,
+        smmOrderId: r.smmOrderId,
+        executedAt: r.executedAt,
+        error:      r.error,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/* =========================
+   🔥 API: MIN VIEWS SETTINGS
+========================= */
+app.get('/api/settings/min-views', (req, res) => {
+  return res.json({ minViewsPerRun: MIN_VIEWS_PER_RUN });
+});
+
+app.post('/api/settings/min-views', (req, res) => {
+  const { minViewsPerRun } = req.body;
+  if (typeof minViewsPerRun !== 'number' || minViewsPerRun < 1) {
+    return res.status(400).json({ error: 'Invalid minViewsPerRun value' });
+  }
+  MIN_VIEWS_PER_RUN = Math.floor(minViewsPerRun);
+  console.log(`[SETTINGS] Min views per run updated to: ${MIN_VIEWS_PER_RUN}`);
+  return res.json({ success: true, minViewsPerRun: MIN_VIEWS_PER_RUN });
+});
+
+/* =========================
+   🔥 API: QUEUE STATUS
+========================= */
+app.get('/api/queues/status', (req, res) => {
+  return res.json({
+    views: {
+      queueLength: viewsQueue.length,
+      isExecuting: isExecuting.VIEWS,
+      pending:     viewsQueue.map(r => ({ id: r.id, quantity: r.quantity, time: r.time })),
+    },
+    likes: {
+      queueLength: likesQueue.length,
+      isExecuting: isExecuting.LIKES,
+      pending:     likesQueue.map(r => ({ id: r.id, quantity: r.quantity, time: r.time })),
+    },
+    shares: {
+      queueLength: sharesQueue.length,
+      isExecuting: isExecuting.SHARES,
+      pending:     sharesQueue.map(r => ({ id: r.id, quantity: r.quantity, time: r.time })),
+    },
+    saves: {
+      queueLength: savesQueue.length,
+      isExecuting: isExecuting.SAVES,
+      pending:     savesQueue.map(r => ({ id: r.id, quantity: r.quantity, time: r.time })),
+    },
+    comments: {
+      queueLength: commentsQueue.length,
+      isExecuting: isExecuting.COMMENTS,
+      pending:     commentsQueue.map(r => ({ id: r.id, quantity: r.quantity, time: r.time })),
+    },
+  });
+});
+
+/* =========================
+   🔥 API: RETRY STUCK RUNS
+========================= */
+app.post('/api/runs/retry-stuck', async (req, res) => {
+  try {
+    let resetCount = 0;
+
+    // 🔥 Reset queued runs that are not in memory queue (orphaned after restart)
+    const orphanedQueued = await Run.find({ status: 'queued' }).lean();
+    const orphanedIds    = orphanedQueued
+      .filter(r => !isRunInQueue(r.id))
+      .map(r => r._id);
+
+    if (orphanedIds.length > 0) {
+      await Run.updateMany(
+        { _id: { $in: orphanedIds } },
+        { $set: { status: 'pending' } }
+      );
+      resetCount += orphanedIds.length;
+    }
+
+    // 🔥 Reset stuck processing runs (no executedAt, older than 15 min)
+    const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const stuckResult   = await Run.updateMany(
+      {
+        status:    'processing',
+        executedAt: null,
+        createdAt: { $lt: fifteenMinAgo },
+      },
+      { $set: { status: 'pending', error: null } }
+    );
+    resetCount += stuckResult.modifiedCount;
+
+    return res.json({
+      success:    true,
+      resetCount,
+      message:    `Reset ${resetCount} stuck runs`,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/* =========================
+   🔥 API: MANUAL SCHEDULER TRIGGER
+========================= */
+app.post('/api/scheduler/trigger', async (req, res) => {
+  try {
+    const now = new Date();
+    let addedToQueue = { views: 0, likes: 0, shares: 0, saves: 0, comments: 0 };
+
+    const pendingRuns = await Run.find({
+      done:   false,
+      status: 'pending',
+      time:   { $lte: now },
+    })
+    .limit(50)
+    .lean();
+
+    // Batch fetch orders
+    const uniqueOrderIds = [...new Set(pendingRuns.map(r => r.schedulerOrderId))];
+    const activeOrders   = await Order.find(
+      { schedulerOrderId: { $in: uniqueOrderIds } },
+      { schedulerOrderId: 1, status: 1 }
+    ).lean();
+    const orderStatusMap = new Map(activeOrders.map(o => [o.schedulerOrderId, o.status]));
+
+    const bulkOps = [];
+
+    for (const run of pendingRuns) {
+      if (isRunInQueue(run.id)) continue;
+
+      const orderStatus = orderStatusMap.get(run.schedulerOrderId);
+      if (!orderStatus || orderStatus === 'cancelled' || orderStatus === 'paused') continue;
+
+      const pushed = pushToQueue(run);
+      if (!pushed) continue;
+
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: run._id },
+          update: { $set: { status: 'queued' } },
+        },
+      });
+
+      if (run.label === 'VIEWS')    addedToQueue.views++;
+      if (run.label === 'LIKES')    addedToQueue.likes++;
+      if (run.label === 'SHARES')   addedToQueue.shares++;
+      if (run.label === 'SAVES')    addedToQueue.saves++;
+      if (run.label === 'COMMENTS') addedToQueue.comments++;
+    }
+
+    if (bulkOps.length > 0) await Run.bulkWrite(bulkOps);
+
+    if (viewsQueue.length > 0    && !isExecuting.VIEWS)    processViewsQueue();
+    if (likesQueue.length > 0    && !isExecuting.LIKES)    processLikesQueue();
+    if (sharesQueue.length > 0   && !isExecuting.SHARES)   processSharesQueue();
+    if (savesQueue.length > 0    && !isExecuting.SAVES)    processSavesQueue();
+    if (commentsQueue.length > 0 && !isExecuting.COMMENTS) processCommentsQueue();
+
+    return res.json({
+      success:      true,
+      addedToQueue,
+      currentQueues: {
+        views:    viewsQueue.length,
+        likes:    likesQueue.length,
+        shares:   sharesQueue.length,
+        saves:    savesQueue.length,
+        comments: commentsQueue.length,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/* =========================
+   🔥 API: HEALTH CHECK
+========================= */
+app.get('/api/health', (req, res) => {
+  return res.json({
+    status:        'ok',
+    mongoConnected: mongoose.connection.readyState === 1,
+    uptime:        process.uptime(),
+    minViewsPerRun: MIN_VIEWS_PER_RUN,
+    queues: {
+      views:    viewsQueue.length,
+      likes:    likesQueue.length,
+      shares:   sharesQueue.length,
+      saves:    savesQueue.length,
+      comments: commentsQueue.length,
+    },
+    executing: {
+      views:    isExecuting.VIEWS,
+      likes:    isExecuting.LIKES,
+      shares:   isExecuting.SHARES,
+      saves:    isExecuting.SAVES,
+      comments: isExecuting.COMMENTS,
+    },
+  });
+});
+
+/* =========================
+   🔥 KEEP ALIVE PING
+   Prevents Render free tier sleep
+========================= */
+const BACKEND_URL = process.env.BACKEND_URL || 'https://iamsuperman-backend.onrender.com';
+setInterval(async () => {
+  try {
+    await axios.get(`${BACKEND_URL}/api/health`, { timeout: 10000 });
+    console.log('[PING] ✅ Keep-alive successful');
+  } catch (e) {
+    console.warn('[PING] ⚠️ Keep-alive failed:', e.message);
+  }
+}, 5 * 60 * 1000);
