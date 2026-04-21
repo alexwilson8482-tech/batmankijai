@@ -5,17 +5,6 @@ interface BundlesPageProps {
   apis: ApiPanel[];
   bundles: Bundle[];
   onAddBundle: (bundle: {
-  name: string;
-  apiId: string;
-  views: string;
-  likes: string;
-  shares: string;
-  saves: string;
-  comments: string;
-}) => void;
-  onUpdateBundle: (
-  id: string,
-  bundle: {
     name: string;
     apiId: string;
     views: string;
@@ -23,14 +12,25 @@ interface BundlesPageProps {
     shares: string;
     saves: string;
     comments: string;
-  }
-) => void;
+  }) => void;
+  onUpdateBundle: (
+    id: string,
+    bundle: {
+      name: string;
+      apiId: string;
+      views: string;
+      likes: string;
+      shares: string;
+      saves: string;
+      comments: string;
+    }
+  ) => void;
   onDeleteBundle: (id: string) => void;
 }
 
 export function BundlesPage({ apis, bundles, onAddBundle, onUpdateBundle, onDeleteBundle }: BundlesPageProps) {
   return (
-    <div className="mx-auto max-w-7xl px-6 py-7">
+    <div className="mx-auto max-w-7xl px-3 py-4 sm:px-6 sm:py-7">
       <BundleManager
         apis={apis}
         bundles={bundles}
