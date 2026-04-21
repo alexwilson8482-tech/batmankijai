@@ -11,12 +11,10 @@ export function DashboardPage({ orders }: DashboardPageProps) {
   const [period, setPeriod] = useState<TimePeriod>("all");
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
-  // 🦇 FIX: Same logic as OrdersPage to determine REAL status
   function getRealStatus(order: CreatedOrder): string {
     const runs = order.runs || [];
     const now = Date.now();
 
-    // Check if all runs are in the future (scheduled)
     if (runs.length > 0) {
       const allFuture = runs.every((run) => {
         const runTime = run?.at instanceof Date ? run.at.getTime() : new Date(run?.at ?? now).getTime();
@@ -27,7 +25,6 @@ export function DashboardPage({ orders }: DashboardPageProps) {
       }
     }
 
-    // Check if all runs are completed (by time)
     if (runs.length > 0) {
       const allCompleted = runs.every((run) => {
         const runTime = run?.at instanceof Date ? run.at.getTime() : new Date(run?.at ?? now).getTime();
@@ -42,7 +39,6 @@ export function DashboardPage({ orders }: DashboardPageProps) {
     return order.status;
   }
 
-  // Filter orders by time period
   const filteredOrders = useMemo(() => {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -60,21 +56,19 @@ export function DashboardPage({ orders }: DashboardPageProps) {
     });
   }, [orders, period]);
 
-  // 🦇 FIX: Calculate stats using getRealStatus()
   const stats = useMemo(() => {
     const total = filteredOrders.length;
-    
-    // Use getRealStatus for accurate counting
+
     const running = filteredOrders.filter((o) => {
       const realStatus = getRealStatus(o);
       return realStatus === "running" || realStatus === "processing" || realStatus === "paused";
     }).length;
-    
+
     const completed = filteredOrders.filter((o) => {
       const realStatus = getRealStatus(o);
       return realStatus === "completed";
     }).length;
-    
+
     const failed = filteredOrders.filter((o) => {
       const realStatus = getRealStatus(o);
       return realStatus === "failed" || realStatus === "cancelled";
@@ -84,13 +78,12 @@ export function DashboardPage({ orders }: DashboardPageProps) {
       const realStatus = getRealStatus(o);
       return realStatus === "scheduled";
     }).length;
-    
+
     const successRate = total > 0 ? Math.round((completed / total) * 100) : 0;
 
     return { total, running, completed, failed, scheduled, successRate };
   }, [filteredOrders]);
 
-  // Calculate services breakdown
   const servicesBreakdown = useMemo(() => {
     let views = 0;
     let likes = 0;
@@ -116,7 +109,6 @@ export function DashboardPage({ orders }: DashboardPageProps) {
     };
   }, [filteredOrders]);
 
-  // Get last 7 days data for chart
   const chartData = useMemo(() => {
     const days: { label: string; count: number; date: Date }[] = [];
     const now = new Date();
@@ -144,31 +136,23 @@ export function DashboardPage({ orders }: DashboardPageProps) {
     return { days, maxCount };
   }, [orders]);
 
-  // 🦇 FIX: Recent orders with real status
   const recentOrders = useMemo(() => {
     return [...orders]
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 5);
   }, [orders]);
 
-  // Get status color using real status
   const getStatusColor = (order: CreatedOrder) => {
     const status = getRealStatus(order);
     switch (status) {
       case "running":
-      case "processing":
-        return "text-yellow-400";
-      case "completed":
-        return "text-emerald-400";
-      case "paused":
-        return "text-orange-400";
-      case "scheduled":
-        return "text-blue-400";
+      case "processing": return "text-yellow-400";
+      case "completed": return "text-emerald-400";
+      case "paused": return "text-orange-400";
+      case "scheduled": return "text-blue-400";
       case "failed":
-      case "cancelled":
-        return "text-red-400";
-      default:
-        return "text-gray-400";
+      case "cancelled": return "text-red-400";
+      default: return "text-gray-400";
     }
   };
 
@@ -176,19 +160,13 @@ export function DashboardPage({ orders }: DashboardPageProps) {
     const status = getRealStatus(order);
     switch (status) {
       case "running":
-      case "processing":
-        return "bg-yellow-500/20";
-      case "completed":
-        return "bg-emerald-500/20";
-      case "paused":
-        return "bg-orange-500/20";
-      case "scheduled":
-        return "bg-blue-500/20";
+      case "processing": return "bg-yellow-500/20";
+      case "completed": return "bg-emerald-500/20";
+      case "paused": return "bg-orange-500/20";
+      case "scheduled": return "bg-blue-500/20";
       case "failed":
-      case "cancelled":
-        return "bg-red-500/20";
-      default:
-        return "bg-gray-500/20";
+      case "cancelled": return "bg-red-500/20";
+      default: return "bg-gray-500/20";
     }
   };
 
@@ -196,19 +174,13 @@ export function DashboardPage({ orders }: DashboardPageProps) {
     const status = getRealStatus(order);
     switch (status) {
       case "running":
-      case "processing":
-        return "⚡";
-      case "completed":
-        return "✅";
-      case "paused":
-        return "⏸️";
-      case "scheduled":
-        return "📅";
+      case "processing": return "⚡";
+      case "completed": return "✅";
+      case "paused": return "⏸️";
+      case "scheduled": return "📅";
       case "failed":
-      case "cancelled":
-        return "❌";
-      default:
-        return "📦";
+      case "cancelled": return "❌";
+      default: return "📦";
     }
   };
 
@@ -218,30 +190,35 @@ export function DashboardPage({ orders }: DashboardPageProps) {
   };
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 px-6 py-7">
+    <div className="mx-auto max-w-7xl space-y-4 px-3 py-4 sm:px-6 sm:py-7">
+
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="flex items-center gap-3">
-            <span className="text-3xl">🦇</span>
-            <h2 className="text-2xl font-bold tracking-tight text-yellow-400">Gotham Command</h2>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <span className="text-2xl sm:text-3xl">🦇</span>
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-yellow-400">
+              Gotham Command
+            </h2>
           </div>
-          <p className="mt-1 text-sm text-gray-500">Monitoring all operations across the city</p>
+          <p className="mt-1 text-xs sm:text-sm text-gray-500">
+            Monitoring all operations across the city
+          </p>
         </div>
 
         {/* Time Period Filter */}
-        <div className="inline-flex rounded-lg border border-yellow-500/30 bg-black p-1">
+        <div className="inline-flex rounded-lg border border-yellow-500/30 bg-black p-1 self-start sm:self-auto">
           {[
             { key: "today", label: "Today" },
-            { key: "week", label: "7 Days" },
-            { key: "month", label: "30 Days" },
-            { key: "all", label: "All Time" },
+            { key: "week", label: "7D" },
+            { key: "month", label: "30D" },
+            { key: "all", label: "All" },
           ].map((item) => (
             <button
               key={item.key}
               type="button"
               onClick={() => setPeriod(item.key as TimePeriod)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+              className={`rounded-md px-2 py-1.5 text-xs font-medium transition sm:px-3 ${
                 period === item.key
                   ? "bg-yellow-500/20 text-yellow-400"
                   : "text-gray-500 hover:text-yellow-300"
@@ -253,86 +230,99 @@ export function DashboardPage({ orders }: DashboardPageProps) {
         </div>
       </div>
 
-      {/* Stats Cards - Now shows 5 cards including Scheduled */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
         {/* Total Orders */}
-        <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-5">
+        <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-3 sm:p-5">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Total Missions</p>
-            <span className="text-xl">📦</span>
+            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-gray-500">
+              Total
+            </p>
+            <span className="text-lg sm:text-xl">📦</span>
           </div>
-          <p className="mt-3 text-3xl font-bold text-white">{stats.total}</p>
-          <p className="mt-1 text-xs text-gray-600">
-            {period === "today" && "Deployed today"}
-            {period === "week" && "Last 7 nights"}
-            {period === "month" && "Last 30 nights"}
+          <p className="mt-2 sm:mt-3 text-2xl sm:text-3xl font-bold text-white">{stats.total}</p>
+          <p className="mt-1 text-[10px] sm:text-xs text-gray-600">
+            {period === "today" && "Today"}
+            {period === "week" && "Last 7 days"}
+            {period === "month" && "Last 30 days"}
             {period === "all" && "All time"}
           </p>
         </div>
 
         {/* Running Orders */}
-        <div className="rounded-xl border border-yellow-500/30 bg-gradient-to-br from-yellow-500/10 to-black p-5">
+        <div className="rounded-xl border border-yellow-500/30 bg-gradient-to-br from-yellow-500/10 to-black p-3 sm:p-5">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium uppercase tracking-wide text-yellow-500">Active</p>
-            <span className="text-xl">⚡</span>
+            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-yellow-500">
+              Active
+            </p>
+            <span className="text-lg sm:text-xl">⚡</span>
           </div>
-          <p className="mt-3 text-3xl font-bold text-yellow-400">{stats.running}</p>
-          <div className="mt-2 flex items-center gap-1">
-            {stats.running > 0 && (
+          <p className="mt-2 sm:mt-3 text-2xl sm:text-3xl font-bold text-yellow-400">{stats.running}</p>
+          <div className="mt-1 sm:mt-2 flex items-center gap-1">
+            {stats.running > 0 ? (
               <>
-                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-yellow-400"></span>
-                <p className="text-xs text-yellow-500/70">In progress</p>
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-yellow-400" />
+                <p className="text-[10px] sm:text-xs text-yellow-500/70">In progress</p>
               </>
-            )}
-            {stats.running === 0 && (
-              <p className="text-xs text-yellow-500/70">No active missions</p>
+            ) : (
+              <p className="text-[10px] sm:text-xs text-yellow-500/70">None active</p>
             )}
           </div>
         </div>
 
         {/* Scheduled Orders */}
-        <div className="rounded-xl border border-blue-500/30 bg-gradient-to-br from-blue-500/10 to-black p-5">
+        <div className="rounded-xl border border-blue-500/30 bg-gradient-to-br from-blue-500/10 to-black p-3 sm:p-5">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium uppercase tracking-wide text-blue-500">Scheduled</p>
-            <span className="text-xl">📅</span>
+            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-blue-500">
+              Scheduled
+            </p>
+            <span className="text-lg sm:text-xl">📅</span>
           </div>
-          <p className="mt-3 text-3xl font-bold text-blue-400">{stats.scheduled}</p>
-          <p className="mt-1 text-xs text-blue-500/70">Awaiting deployment</p>
+          <p className="mt-2 sm:mt-3 text-2xl sm:text-3xl font-bold text-blue-400">{stats.scheduled}</p>
+          <p className="mt-1 text-[10px] sm:text-xs text-blue-500/70">Awaiting deploy</p>
         </div>
 
         {/* Completed Orders */}
-        <div className="rounded-xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-black p-5">
+        <div className="rounded-xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-black p-3 sm:p-5">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium uppercase tracking-wide text-emerald-500">Completed</p>
-            <span className="text-xl">✅</span>
+            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-emerald-500">
+              Done
+            </p>
+            <span className="text-lg sm:text-xl">✅</span>
           </div>
-          <p className="mt-3 text-3xl font-bold text-emerald-400">{stats.completed}</p>
-          <p className="mt-1 text-xs text-emerald-500/70">Mission accomplished</p>
+          <p className="mt-2 sm:mt-3 text-2xl sm:text-3xl font-bold text-emerald-400">{stats.completed}</p>
+          <p className="mt-1 text-[10px] sm:text-xs text-emerald-500/70">Accomplished</p>
         </div>
 
         {/* Failed Orders */}
-        <div className="rounded-xl border border-red-500/30 bg-gradient-to-br from-red-500/10 to-black p-5">
+        <div className="col-span-2 rounded-xl border border-red-500/30 bg-gradient-to-br from-red-500/10 to-black p-3 sm:p-5 lg:col-span-1">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium uppercase tracking-wide text-red-500">Failed</p>
-            <span className="text-xl">❌</span>
+            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-red-500">
+              Failed
+            </p>
+            <span className="text-lg sm:text-xl">❌</span>
           </div>
-          <p className="mt-3 text-3xl font-bold text-red-400">{stats.failed}</p>
-          <p className="mt-1 text-xs text-red-500/70">Needs attention</p>
+          <p className="mt-2 sm:mt-3 text-2xl sm:text-3xl font-bold text-red-400">{stats.failed}</p>
+          <p className="mt-1 text-[10px] sm:text-xs text-red-500/70">Needs attention</p>
         </div>
       </div>
 
       {/* Success Rate Bar */}
-      <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-r from-gray-900 to-black p-5">
+      <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-r from-gray-900 to-black p-4 sm:p-5">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-yellow-400">🎯 Mission Success Rate</h3>
-          <span className={`text-2xl font-bold ${stats.successRate >= 70 ? "text-emerald-400" : stats.successRate >= 40 ? "text-yellow-400" : "text-red-400"}`}>
+          <h3 className="text-xs sm:text-sm font-medium text-yellow-400">🎯 Mission Success Rate</h3>
+          <span className={`text-xl sm:text-2xl font-bold ${
+            stats.successRate >= 70 ? "text-emerald-400" :
+            stats.successRate >= 40 ? "text-yellow-400" : "text-red-400"
+          }`}>
             {stats.successRate}%
           </span>
         </div>
         <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-gray-800">
           <div
             className={`h-full rounded-full transition-all duration-500 ${
-              stats.successRate >= 70 ? "bg-emerald-500" : stats.successRate >= 40 ? "bg-yellow-500" : "bg-red-500"
+              stats.successRate >= 70 ? "bg-emerald-500" :
+              stats.successRate >= 40 ? "bg-yellow-500" : "bg-red-500"
             }`}
             style={{ width: `${stats.successRate}%` }}
           />
@@ -344,17 +334,18 @@ export function DashboardPage({ orders }: DashboardPageProps) {
       </div>
 
       {/* Two Column Layout */}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
+
         {/* Orders Chart */}
-        <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-5">
-          <h3 className="text-sm font-medium text-yellow-400">📈 Night Patrol Activity</h3>
-          <div className="mt-5 flex h-40 items-end justify-between gap-2">
+        <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-4 sm:p-5">
+          <h3 className="text-xs sm:text-sm font-medium text-yellow-400">📈 Night Patrol Activity</h3>
+          <div className="mt-4 sm:mt-5 flex h-32 sm:h-40 items-end justify-between gap-1 sm:gap-2">
             {chartData.days.map((day, index) => {
               const height = chartData.maxCount > 0 ? (day.count / chartData.maxCount) * 100 : 0;
               const isToday = index === chartData.days.length - 1;
               return (
-                <div key={day.label} className="flex flex-1 flex-col items-center gap-2">
-                  <span className="text-xs text-gray-500">{day.count}</span>
+                <div key={day.label} className="flex flex-1 flex-col items-center gap-1 sm:gap-2">
+                  <span className="text-[10px] text-gray-500">{day.count}</span>
                   <div className="relative w-full flex-1">
                     <div
                       className={`absolute bottom-0 w-full rounded-t-md transition-all duration-500 ${
@@ -363,7 +354,7 @@ export function DashboardPage({ orders }: DashboardPageProps) {
                       style={{ height: `${Math.max(height, 4)}%` }}
                     />
                   </div>
-                  <span className={`text-xs ${isToday ? "text-yellow-400 font-medium" : "text-gray-600"}`}>
+                  <span className={`text-[10px] ${isToday ? "text-yellow-400 font-medium" : "text-gray-600"}`}>
                     {day.label}
                   </span>
                 </div>
@@ -373,62 +364,46 @@ export function DashboardPage({ orders }: DashboardPageProps) {
         </div>
 
         {/* Services Breakdown */}
-        <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-5">
-          <h3 className="text-sm font-medium text-yellow-400">🦇 Arsenal Breakdown</h3>
-          <div className="mt-5 space-y-4">
-            <div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-400">👁️ Views</span>
-                <span className="text-gray-500">{servicesBreakdown.views.count.toLocaleString()} ({servicesBreakdown.views.percent}%)</span>
+        <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-4 sm:p-5">
+          <h3 className="text-xs sm:text-sm font-medium text-yellow-400">🦇 Arsenal Breakdown</h3>
+          <div className="mt-4 sm:mt-5 space-y-3 sm:space-y-4">
+            {[
+              { label: "👁️ Views", data: servicesBreakdown.views, color: "bg-yellow-500" },
+              { label: "❤️ Likes", data: servicesBreakdown.likes, color: "bg-yellow-600" },
+              { label: "🔄 Shares", data: servicesBreakdown.shares, color: "bg-yellow-700" },
+              { label: "🔖 Saves", data: servicesBreakdown.saves, color: "bg-amber-600" },
+            ].map((item) => (
+              <div key={item.label}>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-400">{item.label}</span>
+                  <span className="text-gray-500">
+                    {item.data.count.toLocaleString()} ({item.data.percent}%)
+                  </span>
+                </div>
+                <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-800">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${item.color}`}
+                    style={{ width: `${item.data.percent}%` }}
+                  />
+                </div>
               </div>
-              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-800">
-                <div className="h-full rounded-full bg-yellow-500 transition-all duration-500" style={{ width: `${servicesBreakdown.views.percent}%` }} />
-              </div>
-            </div>
+            ))}
 
-            <div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-400">❤️ Likes</span>
-                <span className="text-gray-500">{servicesBreakdown.likes.count.toLocaleString()} ({servicesBreakdown.likes.percent}%)</span>
-              </div>
-              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-800">
-                <div className="h-full rounded-full bg-yellow-600 transition-all duration-500" style={{ width: `${servicesBreakdown.likes.percent}%` }} />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-400">🔄 Shares</span>
-                <span className="text-gray-500">{servicesBreakdown.shares.count.toLocaleString()} ({servicesBreakdown.shares.percent}%)</span>
-              </div>
-              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-800">
-                <div className="h-full rounded-full bg-yellow-700 transition-all duration-500" style={{ width: `${servicesBreakdown.shares.percent}%` }} />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-400">🔖 Saves</span>
-                <span className="text-gray-500">{servicesBreakdown.saves.count.toLocaleString()} ({servicesBreakdown.saves.percent}%)</span>
-              </div>
-              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-800">
-                <div className="h-full rounded-full bg-amber-600 transition-all duration-500" style={{ width: `${servicesBreakdown.saves.percent}%` }} />
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3 text-center">
+            <div className="mt-3 sm:mt-4 rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3 text-center">
               <p className="text-xs text-gray-500">Total Engagements</p>
-              <p className="text-xl font-bold text-yellow-400">{servicesBreakdown.total.toLocaleString()}</p>
+              <p className="text-lg sm:text-xl font-bold text-yellow-400">
+                {servicesBreakdown.total.toLocaleString()}
+              </p>
             </div>
           </div>
         </div>
       </div>
 
       {/* Recent Orders */}
-      <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-5">
+      <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-4 sm:p-5">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-yellow-400">⏰ Recent Missions</h3>
-          <span className="text-xs text-gray-600">Last 5 operations</span>
+          <h3 className="text-xs sm:text-sm font-medium text-yellow-400">⏰ Recent Missions</h3>
+          <span className="text-[10px] sm:text-xs text-gray-600">Last 5 operations</span>
         </div>
 
         {recentOrders.length === 0 ? (
@@ -444,27 +419,26 @@ export function DashboardPage({ orders }: DashboardPageProps) {
               return (
                 <div
                   key={order.id}
-                  className="flex items-center justify-between rounded-lg border border-gray-800 bg-black/50 p-3 transition hover:border-yellow-500/30"
+                  className="flex items-center justify-between gap-2 rounded-lg border border-gray-800 bg-black/50 p-2.5 sm:p-3 transition hover:border-yellow-500/30"
                 >
-                  <div className="flex items-center gap-3">
-                    <span className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-sm ${getStatusBg(order)}`}>
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    <span className={`inline-flex h-7 w-7 sm:h-8 sm:w-8 flex-shrink-0 items-center justify-center rounded-full text-sm ${getStatusBg(order)}`}>
                       {getStatusIcon(order)}
                     </span>
-                    <div>
-                      <p className="text-sm font-medium text-white">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs sm:text-sm font-medium text-white">
                         {order.name || `Mission #${order.id.slice(0, 8)}`}
                       </p>
-                      <p className="text-xs text-gray-600">
-                        {new Date(order.createdAt).toLocaleDateString()} at{" "}
-                        {new Date(order.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      <p className="text-[10px] sm:text-xs text-gray-600">
+                        {new Date(order.createdAt).toLocaleDateString()}
                       </p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium capitalize ${getStatusBg(order)} ${getStatusColor(order)}`}>
+                  <div className="flex-shrink-0 text-right">
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] sm:text-xs font-medium capitalize ${getStatusBg(order)} ${getStatusColor(order)}`}>
                       {realStatus}
                     </span>
-                    <p className="mt-1 text-xs text-gray-600">
+                    <p className="mt-1 text-[10px] text-gray-600">
                       {order.runs?.length || 0} runs
                     </p>
                   </div>
@@ -476,35 +450,35 @@ export function DashboardPage({ orders }: DashboardPageProps) {
       </div>
 
       {/* Quick Stats Footer */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-yellow-500/20 bg-black p-4 text-center">
-          <p className="text-xs text-gray-500">Avg Runs/Mission</p>
-          <p className="mt-1 text-xl font-bold text-yellow-400">
+      <div className="grid grid-cols-3 gap-3 sm:gap-4">
+        <div className="rounded-xl border border-yellow-500/20 bg-black p-3 sm:p-4 text-center">
+          <p className="text-[10px] sm:text-xs text-gray-500">Avg Runs/Mission</p>
+          <p className="mt-1 text-lg sm:text-xl font-bold text-yellow-400">
             {filteredOrders.length > 0
               ? Math.round(filteredOrders.reduce((sum, o) => sum + (o.runs?.length || 0), 0) / filteredOrders.length)
               : 0}
           </p>
         </div>
-        <div className="rounded-xl border border-yellow-500/20 bg-black p-4 text-center">
-          <p className="text-xs text-gray-500">Total Runs Scheduled</p>
-          <p className="mt-1 text-xl font-bold text-white">
+        <div className="rounded-xl border border-yellow-500/20 bg-black p-3 sm:p-4 text-center">
+          <p className="text-[10px] sm:text-xs text-gray-500">Total Runs</p>
+          <p className="mt-1 text-lg sm:text-xl font-bold text-white">
             {filteredOrders.reduce((sum, o) => sum + (o.runs?.length || 0), 0)}
           </p>
         </div>
-        <div className="rounded-xl border border-yellow-500/20 bg-black p-4 text-center">
-          <p className="text-xs text-gray-500">Completed Runs</p>
-          <p className="mt-1 text-xl font-bold text-emerald-400">
+        <div className="rounded-xl border border-yellow-500/20 bg-black p-3 sm:p-4 text-center">
+          <p className="text-[10px] sm:text-xs text-gray-500">Completed Runs</p>
+          <p className="mt-1 text-lg sm:text-xl font-bold text-emerald-400">
             {filteredOrders.reduce((sum, o) => sum + (o.completedRuns || 0), 0)}
           </p>
         </div>
       </div>
 
       {/* Clear Orders Button */}
-      <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-5">
+      <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-4 sm:p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-sm font-medium text-orange-300">🧹 Clear Orders</h3>
-            <p className="mt-1 text-xs text-orange-400/70">
+            <h3 className="text-xs sm:text-sm font-medium text-orange-300">🧹 Clear Orders</h3>
+            <p className="mt-1 text-[10px] sm:text-xs text-orange-400/70">
               Delete all orders for a fresh start.
               <br />
               <span className="text-emerald-400">✓ APIs and Bundles will be kept safe!</span>
@@ -515,24 +489,24 @@ export function DashboardPage({ orders }: DashboardPageProps) {
             <button
               type="button"
               onClick={() => setShowClearConfirm(true)}
-              className="rounded-lg border border-orange-500/50 bg-orange-500/10 px-4 py-2 text-sm font-medium text-orange-200 transition hover:bg-orange-500/20"
+              className="self-start rounded-lg border border-orange-500/50 bg-orange-500/10 px-4 py-2 text-xs sm:text-sm font-medium text-orange-200 transition hover:bg-orange-500/20 sm:self-auto"
             >
               🗑️ Clear Orders
             </button>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs text-orange-300">Are you sure?</span>
               <button
                 type="button"
                 onClick={handleClearOrders}
-                className="rounded-lg border border-red-500 bg-red-500/30 px-4 py-2 text-sm font-medium text-red-100 transition hover:bg-red-500/50"
+                className="rounded-lg border border-red-500 bg-red-500/30 px-3 py-1.5 text-xs font-medium text-red-100 transition hover:bg-red-500/50"
               >
-                ✓ Yes, Delete Orders
+                ✓ Yes, Delete
               </button>
               <button
                 type="button"
                 onClick={() => setShowClearConfirm(false)}
-                className="rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-700"
+                className="rounded-lg border border-gray-600 bg-gray-800 px-3 py-1.5 text-xs font-medium text-gray-300 transition hover:bg-gray-700"
               >
                 ✕ Cancel
               </button>
