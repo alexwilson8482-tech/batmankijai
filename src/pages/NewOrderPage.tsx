@@ -91,14 +91,11 @@ export function NewOrderPage({ apis, bundles, orders, prefillOrder, onCreateOrde
   const [createError, setCreateError] = useState("");
   const [createSuccess, setCreateSuccess] = useState("");
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
-
-  // 🔥 NEW: Minimum views per run state
   const [minViewsPerRun, setMinViewsPerRun] = useState(100);
 
-  // 🔥 NEW: Fetch min views setting from backend on mount
   useEffect(() => {
     const fetchMinViews = async () => {
-            try {
+      try {
         const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim().replace(/\/$/, "") || "https://iamsuperman-backend.onrender.com";
         const response = await fetch(`${backendUrl}/api/settings/min-views`);
         if (response.ok) {
@@ -114,14 +111,12 @@ export function NewOrderPage({ apis, bundles, orders, prefillOrder, onCreateOrde
     fetchMinViews();
   }, []);
 
-  // 🔥 UPDATED: Config now includes minViewsPerRun
   const selectedApi = apis.find(a => a.id === selectedApiId);
-const selectedBundle = bundles.find(b => b.id === selectedBundleId);
+  const selectedBundle = bundles.find(b => b.id === selectedBundleId);
+  const commentsService = selectedApi?.services.find(
+    s => s.id === selectedBundle?.serviceIds.comments
+  );
 
-const commentsService = selectedApi?.services.find(
-  s => s.id === selectedBundle?.serviceIds.comments
-);
-  
   const config: OrderConfig = useMemo(
     () => ({
       postUrl,
@@ -140,23 +135,13 @@ const commentsService = selectedApi?.services.find(
           : delivery.mode === "auto"
             ? { ...delivery, hours: Math.max(6, Math.min(48, delivery.hours)) }
             : delivery,
-      minViewsPerRun, // 🔥 NEW: Pass to pattern generator
+      minViewsPerRun,
     }),
     [
-  postUrl,
-  totalViews,
-  startDelayHours,
-  includeLikes,
-  includeShares,
-  includeSaves,
-  includeComments, // ✅ ADD THIS
-  variancePercent,
-  peakHoursBoost,
-  quickPreset,
-  delivery,
-  customHours,
-  minViewsPerRun,
-]
+      postUrl, totalViews, startDelayHours, includeLikes, includeShares,
+      includeSaves, includeComments, variancePercent, peakHoursBoost,
+      quickPreset, delivery, customHours, minViewsPerRun,
+    ]
   );
 
   const generatedPlan = useMemo(() => {
@@ -186,37 +171,25 @@ const commentsService = selectedApi?.services.find(
       : generatedPlan;
 
     const runs = basePlan?.runs || [];
-
     if (runs.length <= 1) return basePlan;
 
     const baseIntervalMin = basePlan.approximateIntervalMin || 120;
 
     const newRuns = runs.map((run, i) => {
       if (i === 0) return run;
-
       const prevTime = new Date(runs[i - 1].at).getTime();
       const hour = new Date(prevTime).getHours();
-
       let multiplier = 1;
-
       if (hour >= 0 && hour < 6) multiplier = 1.4;
       else if (hour >= 6 && hour < 12) multiplier = 1.1;
       else if (hour >= 18 && hour <= 23) multiplier = 0.85;
-
       const baseIntervalMs = baseIntervalMin * 60 * 1000 * multiplier;
       const variation = baseIntervalMs * (Math.random() * 0.4 - 0.2);
       const newTime = prevTime + baseIntervalMs + variation;
-
-      return {
-        ...run,
-        at: new Date(newTime),
-      };
+      return { ...run, at: new Date(newTime) };
     });
 
-    return {
-      ...basePlan,
-      runs: newRuns,
-    };
+    return { ...basePlan, runs: newRuns };
   }, [useClonedPlan, clonedPlan, generatedPlan]);
 
   const safePlan = useMemo(() => ({ ...plan, runs: plan?.runs || [] }), [plan]);
@@ -238,22 +211,10 @@ const commentsService = selectedApi?.services.find(
   const handleApplyPreset = (preset: QuickPatternPreset) => {
     setUseClonedPlan(false);
     setQuickPreset(preset);
-    if (preset === "viral-boost") {
-      setVariancePercent(48);
-      setDelivery({ mode: "preset", label: "12h", hours: 12 });
-    }
-    if (preset === "fast-start") {
-      setVariancePercent(32);
-      setDelivery({ mode: "preset", label: "6h", hours: 6 });
-    }
-    if (preset === "trending-push") {
-      setVariancePercent(40);
-      setDelivery({ mode: "preset", label: "24h", hours: 24 });
-    }
-    if (preset === "slow-burn") {
-      setVariancePercent(22);
-      setDelivery({ mode: "preset", label: "48h", hours: 48 });
-    }
+    if (preset === "viral-boost") { setVariancePercent(48); setDelivery({ mode: "preset", label: "12h", hours: 12 }); }
+    if (preset === "fast-start") { setVariancePercent(32); setDelivery({ mode: "preset", label: "6h", hours: 6 }); }
+    if (preset === "trending-push") { setVariancePercent(40); setDelivery({ mode: "preset", label: "24h", hours: 24 }); }
+    if (preset === "slow-burn") { setVariancePercent(22); setDelivery({ mode: "preset", label: "48h", hours: 48 }); }
     setSeed((current) => current + 1);
     setExpandedRuns(true);
   };
@@ -264,15 +225,12 @@ const commentsService = selectedApi?.services.find(
     setExpandedRuns(true);
   };
 
-  // 🔥 NEW: Handle min views change - regenerate pattern when changed
   const handleMinViewsChange = (value: number) => {
     const newValue = Math.max(1, Math.floor(value));
     setMinViewsPerRun(newValue);
     setUseClonedPlan(false);
-    setSeed((current) => current + 1); // 🔥 Force regenerate pattern
-
-    // Also update backend
-        const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim().replace(/\/$/, "") || "https://iamsuperman-backend.onrender.com";
+    setSeed((current) => current + 1);
+    const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim().replace(/\/$/, "") || "https://iamsuperman-backend.onrender.com";
     fetch(`${backendUrl}/api/settings/min-views`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -289,30 +247,32 @@ const commentsService = selectedApi?.services.find(
     { mode: "custom", label: "Custom", hours: customHours },
   ];
 
-  // 🔥 Calculate estimated runs and views per run for display
   const estimatedRunCount = safePlan.runs.length;
   const averageViewsPerRun = estimatedRunCount > 0 ? Math.round(totalViews / estimatedRunCount) : 0;
 
   return (
-    <div className="mx-auto max-w-7xl space-y-2 px-3 py-3">
-      {/* Compact Header */}
+    <div className="mx-auto max-w-7xl space-y-3 px-3 py-3 sm:px-4 sm:py-4">
+
+      {/* Header */}
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
         <div className="flex items-center gap-2">
           <span className="text-xl">⚡</span>
-          <h2 className="text-lg font-bold tracking-tight text-yellow-400">New Mission</h2>
-          <span className="text-[10px] text-gray-500 ml-2">Configure delivery patterns</span>
+          <h2 className="text-base sm:text-lg font-bold tracking-tight text-yellow-400">New Mission</h2>
+          <span className="text-[10px] text-gray-500 ml-1 hidden sm:inline">Configure delivery patterns</span>
         </div>
       </motion.div>
 
-      {/* Main Grid - Two Columns */}
+      {/* Main Grid - Single col mobile, two col desktop */}
       <div className="grid gap-3 xl:grid-cols-2">
-        
-        {/* LEFT COLUMN - Basic Order Info */}
-        <div className="space-y-2">
+
+        {/* LEFT COLUMN */}
+        <div className="space-y-3">
+
+          {/* Order Details */}
           <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-3">
             <h3 className="text-xs font-semibold text-yellow-400 mb-2">📋 Order Details</h3>
-            
-            {/* Order Name & URL */}
+
+            {/* Order Name & Total Views */}
             <div className="grid grid-cols-2 gap-2 mb-2">
               <div>
                 <label className="text-[10px] text-gray-500 mb-1 block">Order Name</label>
@@ -363,16 +323,13 @@ const commentsService = selectedApi?.services.find(
               />
             </div>
 
-            {/* API & Bundle Selection */}
+            {/* API & Bundle */}
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-[10px] text-gray-500 mb-1 block">API Panel</label>
                 <select
                   value={selectedApiId}
-                  onChange={(e) => {
-                    setSelectedApiId(e.target.value);
-                    setSelectedBundleId("");
-                  }}
+                  onChange={(e) => { setSelectedApiId(e.target.value); setSelectedBundleId(""); }}
                   className="w-full rounded-lg border border-yellow-500/20 bg-black px-2 py-1.5 text-xs text-white focus:border-yellow-500/50 focus:outline-none"
                 >
                   <option value="">Select API</option>
@@ -397,14 +354,13 @@ const commentsService = selectedApi?.services.find(
             </div>
           </div>
 
-          {/* 🔥 NEW: Minimum Views Per Run Settings Block */}
+          {/* Global Run Settings */}
           <div className="rounded-xl border border-blue-500/30 bg-gradient-to-br from-blue-900/20 to-black p-3">
             <h3 className="text-xs font-semibold text-blue-400 mb-2 flex items-center gap-2">
               <span>⚙️</span> Global Run Settings
             </h3>
-            
+
             <div className="space-y-3">
-              {/* Min Views Input */}
               <div className="flex items-center justify-between gap-3">
                 <label className="text-[10px] text-gray-400">Minimum Views Per Run</label>
                 <div className="flex items-center gap-2">
@@ -420,7 +376,7 @@ const commentsService = selectedApi?.services.find(
                 </div>
               </div>
 
-              {/* Quick presets for min views */}
+              {/* Quick presets */}
               <div className="flex gap-1 flex-wrap">
                 {[100, 200, 300, 500, 1000].map((preset) => (
                   <button
@@ -438,7 +394,7 @@ const commentsService = selectedApi?.services.find(
                 ))}
               </div>
 
-              {/* Live calculation display */}
+              {/* Live calculation */}
               <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 px-2 py-2">
                 <div className="flex items-center justify-between text-[10px]">
                   <span className="text-gray-400">Estimated Runs:</span>
@@ -455,13 +411,13 @@ const commentsService = selectedApi?.services.find(
               </div>
 
               <p className="text-[9px] text-blue-300/60 leading-relaxed">
-                ℹ️ Higher minimum = fewer runs with more views each. Lower minimum = more runs with fewer views each.
+                ℹ️ Higher minimum = fewer runs with more views each.
               </p>
             </div>
           </div>
 
-          {/* Growth Graph - Compact */}
-          <GrowthGraph 
+          {/* Growth Graph */}
+          <GrowthGraph
             plan={safePlan}
             selectedPreset={quickPreset}
             onApplyPreset={handleApplyPreset}
@@ -469,17 +425,17 @@ const commentsService = selectedApi?.services.find(
           />
         </div>
 
-        {/* RIGHT COLUMN - Schedule Preview + Advanced Controls */}
-        <div className="space-y-2">
-          
-          {/* Detection Risk - Inline */}
-          <div className="flex items-center justify-between rounded-lg border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black px-3 py-2">
+        {/* RIGHT COLUMN */}
+        <div className="space-y-3">
+
+          {/* Detection Risk */}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black px-3 py-2">
             <div className="flex items-center gap-2">
               <span className="text-sm">🎯</span>
               <span className="text-xs font-medium text-yellow-400">Risk:</span>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] text-gray-500">{safePlan.estimatedDurationHours}h duration</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] text-gray-500">{safePlan.estimatedDurationHours}h</span>
               <span className="text-[10px] text-gray-500">{estimatedRunCount} runs</span>
               <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${
                 safePlan.risk === "Safe"
@@ -500,14 +456,14 @@ const commentsService = selectedApi?.services.find(
             onToggleRuns={() => setExpandedRuns((prev) => !prev)}
           />
 
-          {/* Advanced Controls - Below Schedule Preview */}
+          {/* Advanced Controls */}
           <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-3">
             <h3 className="text-xs font-semibold text-yellow-400 mb-2">⚙️ Advanced Controls</h3>
-            
-            {/* Row 1: Start Delay & Variance */}
+
+            {/* Start Delay & Variance */}
             <div className="grid grid-cols-2 gap-2 mb-2">
               <div>
-                <label className="text-[10px] text-gray-500 mb-1 block">Start Delay (hours)</label>
+                <label className="text-[10px] text-gray-500 mb-1 block">Start Delay (hrs)</label>
                 <input
                   type="number"
                   value={startDelayHours}
@@ -526,18 +482,15 @@ const commentsService = selectedApi?.services.find(
                 <input
                   type="range"
                   value={variancePercent}
-                  onChange={(e) => {
-                    setUseClonedPlan(false);
-                    setVariancePercent(Number(e.target.value));
-                  }}
+                  onChange={(e) => { setUseClonedPlan(false); setVariancePercent(Number(e.target.value)); }}
                   min={0}
                   max={50}
-                  className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500"
+                  className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500 mt-2"
                 />
               </div>
             </div>
 
-            {/* Row 2: Delivery Speed */}
+            {/* Delivery Speed */}
             <div className="mb-2">
               <label className="text-[10px] text-gray-500 mb-1 block">Delivery Speed</label>
               <div className="flex gap-1 flex-wrap">
@@ -545,10 +498,7 @@ const commentsService = selectedApi?.services.find(
                   <button
                     key={option.label}
                     type="button"
-                    onClick={() => {
-                      setUseClonedPlan(false);
-                      setDelivery(option);
-                    }}
+                    onClick={() => { setUseClonedPlan(false); setDelivery(option); }}
                     className={`rounded-md px-2 py-1 text-[10px] font-medium transition ${
                       delivery.label === option.label
                         ? "border border-yellow-500 bg-yellow-500/20 text-yellow-300"
@@ -578,182 +528,105 @@ const commentsService = selectedApi?.services.find(
               )}
             </div>
 
-            {/* Row 3: Engagement Toggles + Peak Hours */}
+            {/* Engagement Toggles */}
             <div className="flex flex-wrap items-center gap-2">
               <label className="text-[10px] text-gray-500">Engagement:</label>
-              
-              <button
-                type="button"
-                onClick={() => { setUseClonedPlan(false); setIncludeLikes(!includeLikes); }}
-                className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition ${
-                  includeLikes
-                    ? "border border-pink-500 bg-pink-500/20 text-pink-300"
-                    : "border border-gray-600 bg-black text-gray-500"
-                }`}
-              >
-                ❤️ Likes
-              </button>
-              
-              <button
-                type="button"
-                onClick={() => { setUseClonedPlan(false); setIncludeShares(!includeShares); }}
-                className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition ${
-                  includeShares
-                    ? "border border-blue-500 bg-blue-500/20 text-blue-300"
-                    : "border border-gray-600 bg-black text-gray-500"
-                }`}
-              >
-                🔄 Shares
-              </button>
-              
-              <button
-                type="button"
-                onClick={() => { setUseClonedPlan(false); setIncludeSaves(!includeSaves); }}
-                className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition ${
-                  includeSaves
-                    ? "border border-purple-500 bg-purple-500/20 text-purple-300"
-                    : "border border-gray-600 bg-black text-gray-500"
-                }`}
-              >
-                💾 Saves
-              </button>
-
-              <button
-  type="button"
-  onClick={() => { setUseClonedPlan(false); setIncludeComments(!includeComments); }}
-  className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition ${
-    includeComments
-      ? "border border-pink-500 bg-pink-500/20 text-pink-300"
-      : "border border-gray-600 bg-black text-gray-500"
-  }`}
->
-  💬 Comments
-</button>
-
-              <div className="ml-auto">
+              {[
+                { label: "❤️ Likes", active: includeLikes, toggle: () => { setUseClonedPlan(false); setIncludeLikes(!includeLikes); }, activeClass: "border-pink-500 bg-pink-500/20 text-pink-300" },
+                { label: "🔄 Shares", active: includeShares, toggle: () => { setUseClonedPlan(false); setIncludeShares(!includeShares); }, activeClass: "border-blue-500 bg-blue-500/20 text-blue-300" },
+                { label: "💾 Saves", active: includeSaves, toggle: () => { setUseClonedPlan(false); setIncludeSaves(!includeSaves); }, activeClass: "border-purple-500 bg-purple-500/20 text-purple-300" },
+                { label: "💬 Comments", active: includeComments, toggle: () => { setUseClonedPlan(false); setIncludeComments(!includeComments); }, activeClass: "border-pink-500 bg-pink-500/20 text-pink-300" },
+              ].map((btn) => (
                 <button
+                  key={btn.label}
                   type="button"
-                  onClick={() => { setUseClonedPlan(false); setPeakHoursBoost(!peakHoursBoost); }}
+                  onClick={btn.toggle}
                   className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition ${
-                    peakHoursBoost
-                      ? "border border-orange-500 bg-orange-500/20 text-orange-300"
-                      : "border border-gray-600 bg-black text-gray-500"
+                    btn.active ? btn.activeClass : "border border-gray-600 bg-black text-gray-500"
                   }`}
                 >
-                  🔥 Peak Hours
+                  {btn.label}
                 </button>
-              </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => { setUseClonedPlan(false); setPeakHoursBoost(!peakHoursBoost); }}
+                className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition ${
+                  peakHoursBoost
+                    ? "border border-orange-500 bg-orange-500/20 text-orange-300"
+                    : "border border-gray-600 bg-black text-gray-500"
+                }`}
+              >
+                🔥 Peak
+              </button>
             </div>
           </div>
-<div className="mt-2">
-  <label className="text-[10px] text-gray-500 mb-1 block">
-    💬 Custom Comments (one per line)
-  </label>
-  <textarea
-    value={customComments}
-    onChange={(e) => setCustomComments(e.target.value)}
-    rows={3}
-    placeholder={"Nice post!\n🔥🔥\nAmazing"}
-    className="w-full rounded-lg border border-yellow-500/20 bg-black px-2 py-1.5 text-xs text-white"
-  />
-</div>
-          {/* Price Calculator - Compact Horizontal */}
+
+          {/* Custom Comments */}
+          <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-3">
+            <label className="text-[10px] text-gray-500 mb-1 block">
+              💬 Custom Comments (one per line)
+            </label>
+            <textarea
+              value={customComments}
+              onChange={(e) => setCustomComments(e.target.value)}
+              rows={3}
+              placeholder={"Nice post!\n🔥🔥\nAmazing"}
+              className="w-full rounded-lg border border-yellow-500/20 bg-black px-2 py-1.5 text-xs text-white placeholder-gray-600 focus:border-yellow-500/50 focus:outline-none resize-none"
+            />
+          </div>
+
+          {/* Price Calculator */}
           {selectedBundleId && safePlan.runs.length > 0 && (
             <div className="rounded-lg border border-yellow-500/30 bg-gradient-to-br from-yellow-500/5 to-black p-2">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className="text-xs font-semibold text-yellow-400">💰</span>
-                
-                {/* Price Items */}
+                <span className="text-xs font-semibold text-yellow-400">💰 Estimated Cost</span>
+
                 <div className="flex items-center gap-1 flex-wrap flex-1">
                   {(() => {
-                    const selectedBundle = bundles.find(b => b.id === selectedBundleId);
-                    const selectedApi = apis.find(a => a.id === selectedApiId);
-                    
-                    if (!selectedBundle || !selectedApi) return null;
-                    
-                    const viewsService = selectedApi.services.find(s => s.id === selectedBundle.serviceIds.views);
-                    const likesService = selectedApi.services.find(s => s.id === selectedBundle.serviceIds.likes);
-                    const sharesService = selectedApi.services.find(s => s.id === selectedBundle.serviceIds.shares);
-                    const savesService = selectedApi.services.find(s => s.id === selectedBundle.serviceIds.saves);
-                    const commentsService = selectedApi.services.find(s => s.id === selectedBundle.serviceIds.comments);
-                    const commentsMin = Number(commentsService?.min || 0);
-                    
+                    const selBundle = bundles.find(b => b.id === selectedBundleId);
+                    const selApi = apis.find(a => a.id === selectedApiId);
+                    if (!selBundle || !selApi) return null;
+
+                    const viewsService = selApi.services.find(s => s.id === selBundle.serviceIds.views);
+                    const likesService = selApi.services.find(s => s.id === selBundle.serviceIds.likes);
+                    const sharesService = selApi.services.find(s => s.id === selBundle.serviceIds.shares);
+                    const savesService = selApi.services.find(s => s.id === selBundle.serviceIds.saves);
+                    const commentsService = selApi.services.find(s => s.id === selBundle.serviceIds.comments);
+
                     const totalViewsQty = safePlan.runs.reduce((sum, run) => sum + (run.views || 0), 0);
                     const totalLikesQty = safePlan.runs.reduce((sum, run) => sum + (run.likes || 0), 0);
                     const totalSharesQty = safePlan.runs.reduce((sum, run) => sum + (run.shares || 0), 0);
                     const totalSavesQty = safePlan.runs.reduce((sum, run) => sum + (run.saves || 0), 0);
                     const totalCommentsQty = safePlan.runs.reduce((sum, run) => sum + (run.comments || 0), 0);
-                    
+
                     const viewsRate = parseFloat(viewsService?.rate || "0");
                     const likesRate = parseFloat(likesService?.rate || "0");
                     const sharesRate = parseFloat(sharesService?.rate || "0");
                     const savesRate = parseFloat(savesService?.rate || "0");
                     const commentsRate = parseFloat(commentsService?.rate || "0");
-                    
+
                     const viewsPrice = (totalViewsQty / 1000) * viewsRate;
                     const likesPrice = includeLikes ? (totalLikesQty / 1000) * likesRate : 0;
                     const sharesPrice = includeShares ? (totalSharesQty / 1000) * sharesRate : 0;
                     const savesPrice = includeSaves ? (totalSavesQty / 1000) * savesRate : 0;
                     const commentsPrice = includeComments ? (totalCommentsQty / 1000) * commentsRate : 0;
-                    
+                    const total = viewsPrice + likesPrice + sharesPrice + savesPrice + commentsPrice;
+
                     return (
                       <>
-                        <span className="text-[10px] text-gray-400">👁️{(totalViewsQty/1000).toFixed(0)}k=₹{viewsPrice.toFixed(0)}</span>
-                        {includeLikes && totalLikesQty > 0 && (
-                          <span className="text-[10px] text-gray-400">❤️{(totalLikesQty/1000).toFixed(1)}k=₹{likesPrice.toFixed(0)}</span>
-                        )}
-                        {includeShares && totalSharesQty > 0 && (
-                          <span className="text-[10px] text-gray-400">🔄{(totalSharesQty/1000).toFixed(1)}k=₹{sharesPrice.toFixed(0)}</span>
-                        )}
-                        {includeSaves && totalSavesQty > 0 && (
-                          <span className="text-[10px] text-gray-400">💾{(totalSavesQty/1000).toFixed(1)}k=₹{savesPrice.toFixed(0)}</span>
-                        )}
-                        {includeComments && totalCommentsQty > 0 && (
-                          <span className="text-[10px] text-gray-400">
-                          💬{(totalCommentsQty/1000).toFixed(1)}k=₹{commentsPrice.toFixed(0)}
-                          </span>
-                        )}
+                        <span className="text-[10px] text-gray-400">👁️{(totalViewsQty / 1000).toFixed(0)}k=₹{viewsPrice.toFixed(0)}</span>
+                        {includeLikes && totalLikesQty > 0 && <span className="text-[10px] text-gray-400">❤️₹{likesPrice.toFixed(0)}</span>}
+                        {includeShares && totalSharesQty > 0 && <span className="text-[10px] text-gray-400">🔄₹{sharesPrice.toFixed(0)}</span>}
+                        {includeSaves && totalSavesQty > 0 && <span className="text-[10px] text-gray-400">💾₹{savesPrice.toFixed(0)}</span>}
+                        {includeComments && totalCommentsQty > 0 && <span className="text-[10px] text-gray-400">💬₹{commentsPrice.toFixed(0)}</span>}
+                        <div className="ml-auto rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2 py-1">
+                          <span className="text-sm font-bold text-yellow-400">₹{total.toFixed(0)}</span>
+                        </div>
                       </>
                     );
                   })()}
-                </div>
-                
-                {/* Total */}
-                <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2 py-1">
-                  <span className="text-sm font-bold text-yellow-400">
-                    ₹{(() => {
-                      const selectedBundle = bundles.find(b => b.id === selectedBundleId);
-                      const selectedApi = apis.find(a => a.id === selectedApiId);
-                      
-                      if (!selectedBundle || !selectedApi) return "0";
-                      
-                      const viewsService = selectedApi.services.find(s => s.id === selectedBundle.serviceIds.views);
-const likesService = selectedApi.services.find(s => s.id === selectedBundle.serviceIds.likes);
-const sharesService = selectedApi.services.find(s => s.id === selectedBundle.serviceIds.shares);
-const savesService = selectedApi.services.find(s => s.id === selectedBundle.serviceIds.saves);
-const commentsService = selectedApi.services.find(s => s.id === selectedBundle.serviceIds.comments);
-
-const totalViewsQty = safePlan.runs.reduce((sum, run) => sum + (run.views || 0), 0);
-const totalLikesQty = safePlan.runs.reduce((sum, run) => sum + (run.likes || 0), 0);
-const totalSharesQty = safePlan.runs.reduce((sum, run) => sum + (run.shares || 0), 0);
-const totalSavesQty = safePlan.runs.reduce((sum, run) => sum + (run.saves || 0), 0);
-const totalCommentsQty = safePlan.runs.reduce((sum, run) => sum + (run.comments || 0), 0);
-
-const viewsRate = parseFloat(viewsService?.rate || "0");
-const likesRate = parseFloat(likesService?.rate || "0");
-const sharesRate = parseFloat(sharesService?.rate || "0");
-const savesRate = parseFloat(savesService?.rate || "0");
-const commentsRate = parseFloat(commentsService?.rate || "0");
-
-const viewsPrice = (totalViewsQty / 1000) * viewsRate;
-const likesPrice = includeLikes ? (totalLikesQty / 1000) * likesRate : 0;
-const sharesPrice = includeShares ? (totalSharesQty / 1000) * sharesRate : 0;
-const savesPrice = includeSaves ? (totalSavesQty / 1000) * savesRate : 0;
-const commentsPrice = includeComments ? (totalCommentsQty / 1000) * commentsRate : 0;
-
-return (viewsPrice + likesPrice + sharesPrice + savesPrice + commentsPrice).toFixed(0);
-                    })()}
-                  </span>
                 </div>
               </div>
             </div>
@@ -761,14 +634,14 @@ return (viewsPrice + likesPrice + sharesPrice + savesPrice + commentsPrice).toFi
         </div>
       </div>
 
-      {/* Deploy Button - Full Width Bottom */}
-      <div className="flex items-center justify-between rounded-lg border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black px-3 py-2">
-        <div className="flex items-center gap-2">
-          {createError && <span className="text-[10px] text-red-400">❌ {createError}</span>}
-          {createSuccess && <span className="text-[10px] text-emerald-400">✅ {createSuccess}</span>}
+      {/* Deploy Button */}
+      <div className="flex flex-col gap-2 rounded-lg border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          {createError && <span className="text-[10px] text-red-400 truncate">❌ {createError}</span>}
+          {createSuccess && <span className="text-[10px] text-emerald-400 truncate">✅ {createSuccess}</span>}
           {!createError && !createSuccess && (
             <span className="text-[10px] text-gray-500">
-              Ready to deploy • {estimatedRunCount} runs • ~{averageViewsPerRun} views/run
+              Ready • {estimatedRunCount} runs • ~{averageViewsPerRun} views/run
             </span>
           )}
         </div>
@@ -779,169 +652,70 @@ return (viewsPrice + likesPrice + sharesPrice + savesPrice + commentsPrice).toFi
             console.log("CLICKED BUTTON");
             setCreateError("");
             setCreateSuccess("");
-            if (!selectedBundleId) {
-              setCreateError("Select a bundle before creating a mission.");
-              return;
-            }
-            const bulkTargets = bulkLinks
-              .split(/\r?\n/)
-              .map((line) => line.trim())
-              .filter(Boolean);
+            if (!selectedBundleId) { setCreateError("Select a bundle before creating a mission."); return; }
+            const bulkTargets = bulkLinks.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
             const singleTarget = postUrl.trim();
             const targets = bulkTargets.length > 0 ? bulkTargets : singleTarget ? [singleTarget] : [];
-            if (!targets.length) {
-              setCreateError("Add a post URL or paste multiple links.");
-              return;
-            }
+            if (!targets.length) { setCreateError("Add a post URL or paste multiple links."); return; }
             const invalidTarget = targets.find((target) => !isValidUrl(target));
-            if (invalidTarget) {
-              setCreateError(`Invalid URL: ${invalidTarget.slice(0, 30)}...`);
-              return;
-            }
+            if (invalidTarget) { setCreateError(`Invalid URL: ${invalidTarget.slice(0, 30)}...`); return; }
 
-            const selectedApi = apis.find((api) => api.id === selectedApiId) ?? null;
-            if (!selectedApi) {
-              setCreateError("Select an API.");
-              return;
-            }
-            if (!selectedApi.url.trim()) {
-              setCreateError("API URL is required.");
-              return;
-            }
-            if (!isValidUrl(selectedApi.url.trim())) {
-              setCreateError("API URL must be valid.");
-              return;
-            }
-            if (!selectedApi.key.trim()) {
-              setCreateError("API key is required.");
-              return;
-            }
+            const selApi = apis.find((api) => api.id === selectedApiId) ?? null;
+            if (!selApi) { setCreateError("Select an API."); return; }
+            if (!selApi.url.trim()) { setCreateError("API URL is required."); return; }
+            if (!isValidUrl(selApi.url.trim())) { setCreateError("API URL must be valid."); return; }
+            if (!selApi.key.trim()) { setCreateError("API key is required."); return; }
 
-            const selectedBundle = bundles.find((bundle) => bundle.id === selectedBundleId);
-            if (!selectedBundle) {
-              setCreateError("Select a valid bundle.");
-              return;
-            }
-            const viewsServiceId = selectedBundle.serviceIds.views.trim();
-            if (!viewsServiceId) {
-              setCreateError("Bundle has no Views service.");
-              return;
-            }
-            const likesServiceId = selectedBundle.serviceIds.likes.trim();
-            const sharesServiceId = selectedBundle.serviceIds.shares.trim();
-            const savesServiceId = selectedBundle.serviceIds.saves.trim();
-            if (includeLikes && !likesServiceId) {
-              setCreateError("Bundle has no Likes service.");
-              return;
-            }
-            if (includeShares && !sharesServiceId) {
-              setCreateError("Bundle has no Shares service.");
-              return;
-            }
-            if (includeSaves && !savesServiceId) {
-              setCreateError("Bundle has no Saves service.");
-              return;
-            }
-            const commentsServiceId = selectedBundle.serviceIds.comments?.trim();
-            if (includeComments && !commentsServiceId) {
-  setCreateError("Bundle has no Comments service.");
-  return;
-}
+            const selBundle = bundles.find((bundle) => bundle.id === selectedBundleId);
+            if (!selBundle) { setCreateError("Select a valid bundle."); return; }
+            const viewsServiceId = selBundle.serviceIds.views.trim();
+            if (!viewsServiceId) { setCreateError("Bundle has no Views service."); return; }
+            const likesServiceId = selBundle.serviceIds.likes.trim();
+            const sharesServiceId = selBundle.serviceIds.shares.trim();
+            const savesServiceId = selBundle.serviceIds.saves.trim();
+            if (includeLikes && !likesServiceId) { setCreateError("Bundle has no Likes service."); return; }
+            if (includeShares && !sharesServiceId) { setCreateError("Bundle has no Shares service."); return; }
+            if (includeSaves && !savesServiceId) { setCreateError("Bundle has no Saves service."); return; }
+            const commentsServiceId = selBundle.serviceIds.comments?.trim();
+            if (includeComments && !commentsServiceId) { setCreateError("Bundle has no Comments service."); return; }
 
             const quantity = (safePlan?.runs || []).reduce((acc, run) => acc + run.views, 0);
-            if (!Number.isFinite(quantity) || quantity <= 0) {
-              setCreateError("Quantity must be > 0.");
-              return;
-            }
-            if (quantity < minViewsPerRun) {
-              setCreateError(`Views must be at least ${minViewsPerRun}.`);
-              return;
-            }
+            if (!Number.isFinite(quantity) || quantity <= 0) { setCreateError("Quantity must be > 0."); return; }
+            if (quantity < minViewsPerRun) { setCreateError(`Views must be at least ${minViewsPerRun}.`); return; }
 
             const totalLikes = (safePlan?.runs || []).reduce((acc, run) => acc + run.likes, 0);
             const totalShares = (safePlan?.runs || []).reduce((acc, run) => acc + run.shares, 0);
             const totalSaves = (safePlan?.runs || []).reduce((acc, run) => acc + run.saves, 0);
-            const totalCommentsQty = (safePlan?.runs || []).reduce(
-  (acc, run) => acc + (run.comments || 0),
-  0
-);
+            const totalCommentsQty = (safePlan?.runs || []).reduce((acc, run) => acc + (run.comments || 0), 0);
 
-            if (includeLikes && totalLikes < 10) {
-              setCreateError("Likes must be at least 10.");
-              return;
-            }
-            if (includeShares && totalShares < 20) {
-              setCreateError("Shares must be at least 20.");
-              return;
-            }
-            if (includeSaves && totalSaves < 10) {
-              setCreateError("Saves must be at least 10.");
-              return;
-            }
-            if (includeComments && totalCommentsQty <= 0) {
-  setCreateError("Comments must be greater than 0.");
-  return;
-}
-
-            if (quantity > 100000) {
-              const proceed = window.confirm("Large mission. Continue?");
-              if (!proceed) return;
-            }
+            if (includeLikes && totalLikes < 10) { setCreateError("Likes must be at least 10."); return; }
+            if (includeShares && totalShares < 20) { setCreateError("Shares must be at least 20."); return; }
+            if (includeSaves && totalSaves < 10) { setCreateError("Saves must be at least 10."); return; }
+            if (includeComments && totalCommentsQty <= 0) { setCreateError("Comments must be greater than 0."); return; }
+            if (quantity > 100000) { const proceed = window.confirm("Large mission. Continue?"); if (!proceed) return; }
 
             const viewRuns = (safePlan?.runs || []).map((run) => ({
               time: run.at.toISOString(),
               quantity: Math.max(Math.floor(run.views), minViewsPerRun),
             }));
             if (!viewRuns.length || viewRuns.some((run) => !run.time || !Number.isFinite(run.quantity) || run.quantity <= 0)) {
-              setCreateError("Invalid run schedule. Regenerate.");
-              return;
+              setCreateError("Invalid run schedule. Regenerate."); return;
             }
 
-            const likesRuns = (safePlan?.runs || []).map((run) => ({
-              time: run.at.toISOString(),
-              quantity: Math.max(0, Math.floor(run.likes)),
-            }));
-            const sharesRuns = (safePlan?.runs || []).map((run) => ({
-              time: run.at.toISOString(),
-              quantity: Math.max(0, Math.floor(run.shares)),
-            }));
-            const savesRuns = (safePlan?.runs || []).map((run) => ({
-              time: run.at.toISOString(),
-              quantity: Math.max(0, Math.floor(run.saves)),
-            }));
+            const likesRuns = (safePlan?.runs || []).map((run) => ({ time: run.at.toISOString(), quantity: Math.max(0, Math.floor(run.likes)) }));
+            const sharesRuns = (safePlan?.runs || []).map((run) => ({ time: run.at.toISOString(), quantity: Math.max(0, Math.floor(run.shares)) }));
+            const savesRuns = (safePlan?.runs || []).map((run) => ({ time: run.at.toISOString(), quantity: Math.max(0, Math.floor(run.saves)) }));
 
-const commentList = customComments
-  .split("\n")
-  .map(c => c.trim())
-  .filter(Boolean);
-
-const commentsRuns = (safePlan?.runs || []).map((run) => {
-  const required = Math.floor(run.comments || 0);
-
-  if (required <= 0) {
-    return { time: run.at.toISOString(), comments: "" };
-  }
-
-  let finalComments = [];
-
-  if (commentList.length === 0) {
-    finalComments = ["Nice post"];
-  } else if (commentList.length >= required) {
-    finalComments = commentList.slice(0, required);
-  } else {
-    // duplicate
-    while (finalComments.length < required) {
-      finalComments.push(
-        commentList[finalComments.length % commentList.length]
-      );
-    }
-  }
-
-  return {
-    time: run.at.toISOString(),
-    comments: finalComments.join("\n"),
-  };
-});
+            const commentList = customComments.split("\n").map(c => c.trim()).filter(Boolean);
+            const commentsRuns = (safePlan?.runs || []).map((run) => {
+              const required = Math.floor(run.comments || 0);
+              if (required <= 0) return { time: run.at.toISOString(), comments: "" };
+              let finalComments: string[] = [];
+              if (commentList.length === 0) { finalComments = ["Nice post"]; }
+              else if (commentList.length >= required) { finalComments = commentList.slice(0, required); }
+              else { while (finalComments.length < required) { finalComments.push(commentList[finalComments.length % commentList.length]); } }
+              return { time: run.at.toISOString(), comments: finalComments.join("\n") };
+            });
             const filteredCommentsRuns = commentsRuns.filter(run => run.comments && run.comments.length > 0);
 
             const servicesPayload: {
@@ -950,39 +724,30 @@ const commentsRuns = (safePlan?.runs || []).map((run) => {
               shares?: { serviceId: string; runs: Array<{ time: string; quantity: number }> };
               saves?: { serviceId: string; runs: Array<{ time: string; quantity: number }> };
               comments?: { serviceId: string; runs: Array<{ time: string; comments: string }> };
-            } = {
-              views: { serviceId: viewsServiceId, runs: viewRuns },
-            };
+            } = { views: { serviceId: viewsServiceId, runs: viewRuns } };
 
             if (includeLikes) servicesPayload.likes = { serviceId: likesServiceId, runs: likesRuns };
             if (includeShares) servicesPayload.shares = { serviceId: sharesServiceId, runs: sharesRuns };
             if (includeSaves) servicesPayload.saves = { serviceId: savesServiceId, runs: savesRuns };
             if (includeComments && filteredCommentsRuns.length > 0) {
-  servicesPayload.comments = {
-    serviceId: commentsServiceId,
-    runs: filteredCommentsRuns,
-  };
-}
+              servicesPayload.comments = { serviceId: commentsServiceId!, runs: filteredCommentsRuns };
+            }
+
             setIsCreatingOrder(true);
             setCreateSuccess(`Processing ${targets.length} missions...`);
-            
+
             const batchId = targets.length > 1 ? `batch-${Date.now()}` : undefined;
-            
+
             try {
               const activeLinks = new Set(
-  orders
-    .filter((order) => {
-      const now = Date.now();
-      const runs = order.runs || [];
-      if (!runs.length) return false;
-      const allRunsCompleted = runs.every((run) => new Date(run.at).getTime() <= now);
-      return !allRunsCompleted && 
-        order.status !== "cancelled" && 
-        order.status !== "failed" && 
-        order.status !== "completed";
-    })
-    .map((order) => order.link.replace(/\/+$/, "").toLowerCase())
-);
+                orders.filter((order) => {
+                  const now = Date.now();
+                  const runs = order.runs || [];
+                  if (!runs.length) return false;
+                  const allRunsCompleted = runs.every((run) => new Date(run.at).getTime() <= now);
+                  return !allRunsCompleted && order.status !== "cancelled" && order.status !== "failed" && order.status !== "completed";
+                }).map((order) => order.link.replace(/\/+$/, "").toLowerCase())
+              );
               const createdLinks = new Set<string>();
               let successCount = 0;
               let failedCount = 0;
@@ -992,16 +757,14 @@ const commentsRuns = (safePlan?.runs || []).map((run) => {
                 const trimmedUrl = targets[index];
                 const normalizedTarget = trimmedUrl.replace(/\/+$/, "").toLowerCase();
                 if (activeLinks.has(normalizedTarget) || createdLinks.has(normalizedTarget)) {
-                  failedCount += 1;
-                  lastError = "Duplicate link.";
-                  continue;
+                  failedCount += 1; lastError = "Duplicate link."; continue;
                 }
 
                 try {
                   const result = await createSmmOrder({
                     name: orderName.trim() || undefined,
-                    apiUrl: selectedApi.url,
-                    apiKey: selectedApi.key,
+                    apiUrl: selApi.url,
+                    apiKey: selApi.key,
                     link: trimmedUrl,
                     services: servicesPayload,
                   });
@@ -1022,8 +785,8 @@ const commentsRuns = (safePlan?.runs || []).map((run) => {
                     runs: safePlan?.runs || [],
                     engagement: { likes: totalLikes, shares: totalShares, saves: totalSaves, comments: totalCommentsQty },
                     serviceId: viewsServiceId,
-                    selectedAPI: selectedApi.name,
-                    selectedBundle: selectedBundle.name,
+                    selectedAPI: selApi.name,
+                    selectedBundle: selBundle.name,
                     status: result.status === "completed" ? "completed" : "running",
                     completedRuns: typeof result.completedRuns === "number" ? result.completedRuns : 0,
                     runStatuses: (safePlan?.runs || []).map(() => "pending"),
@@ -1051,8 +814,8 @@ const commentsRuns = (safePlan?.runs || []).map((run) => {
                     runs: safePlan?.runs || [],
                     engagement: { likes: totalLikes, shares: totalShares, saves: totalSaves, comments: totalCommentsQty },
                     serviceId: viewsServiceId,
-                    selectedAPI: selectedApi.name,
-                    selectedBundle: selectedBundle.name,
+                    selectedAPI: selApi.name,
+                    selectedBundle: selBundle.name,
                     status: "failed",
                     completedRuns: 0,
                     runStatuses: (safePlan?.runs || []).map((_, i) => (i === 0 ? "cancelled" : "pending")),
@@ -1073,9 +836,7 @@ const commentsRuns = (safePlan?.runs || []).map((run) => {
                 return;
               }
 
-              const successLabel = targets.length > 1
-                ? `Done: ${successCount}/${targets.length}`
-                : "Mission Deployed ✅";
+              const successLabel = targets.length > 1 ? `Done: ${successCount}/${targets.length}` : "Mission Deployed ✅";
               setCreateSuccess(successLabel);
               if (failedCount > 0) setCreateError(`${failedCount} failed`);
               onNavigateToOrders(successLabel);
@@ -1083,9 +844,9 @@ const commentsRuns = (safePlan?.runs || []).map((run) => {
               setIsCreatingOrder(false);
             }
           }}
-          className="whitespace-nowrap rounded-lg border border-yellow-500/50 bg-yellow-500/20 px-4 py-1.5 text-xs font-semibold text-yellow-300 transition hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-full sm:w-auto whitespace-nowrap rounded-lg border border-yellow-500/50 bg-yellow-500/20 px-6 py-2 text-xs font-semibold text-yellow-300 transition hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isCreatingOrder ? "Deploying..." : "🦇 Deploy"}
+          {isCreatingOrder ? "Deploying..." : "🦇 Deploy Mission"}
         </button>
       </div>
     </div>
