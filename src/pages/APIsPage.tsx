@@ -13,7 +13,7 @@ interface APIsPageProps {
 
 export function APIsPage({ apis, onAddApi, onEditApi, onDeleteApi, onToggleStatus, onFetchServices, fetchingApiId }: APIsPageProps) {
   return (
-    <div className="mx-auto max-w-7xl px-6 py-7">
+    <div className="mx-auto max-w-7xl px-3 py-4 sm:px-6 sm:py-7">
       <APIManager
         apis={apis}
         onAddApi={onAddApi}
