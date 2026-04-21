@@ -1,3 +1,4 @@
+// BundleManager.tsx
 import { useMemo, useState } from "react";
 import type { ApiPanel, ApiService, Bundle } from "../types/order";
 
@@ -5,27 +6,26 @@ interface BundleManagerProps {
   apis: ApiPanel[];
   bundles: Bundle[];
   onAddBundle: (bundle: {
-  name: string;
-  apiId: string;
-  views: string;
-  likes: string;
-  shares: string;
-  saves: string;
-  comments: string; // ✅ ADD THIS
-}) => void;
-
-onUpdateBundle: (
-  id: string,
-  bundle: {
     name: string;
     apiId: string;
     views: string;
     likes: string;
     shares: string;
     saves: string;
-    comments: string; // ✅ ADD THIS
-  }
-) => void;
+    comments: string;
+  }) => void;
+  onUpdateBundle: (
+    id: string,
+    bundle: {
+      name: string;
+      apiId: string;
+      views: string;
+      likes: string;
+      shares: string;
+      saves: string;
+      comments: string;
+    }
+  ) => void;
   onDeleteBundle: (id: string) => void;
 }
 
@@ -40,7 +40,6 @@ function getApiServices(apis: ApiPanel[], apiId: string) {
   return apis.find((api) => api.id === apiId)?.services ?? [];
 }
 
-// 🔍 Searchable Dropdown Component
 function SearchableSelect({
   options,
   value,
@@ -72,81 +71,61 @@ function SearchableSelect({
   return (
     <div className="relative">
       <label className="mb-1 block text-xs text-gray-500">{label}</label>
-      
-      {/* Selected value display */}
+
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full rounded-xl border border-yellow-500/30 bg-black px-3 py-2.5 text-left text-sm text-gray-100 transition-all hover:border-yellow-500/50 focus:border-yellow-500/50 focus:outline-none"
+        className="w-full rounded-xl border border-yellow-500/30 bg-black px-3 py-2.5 text-left text-xs sm:text-sm text-gray-100 transition-all hover:border-yellow-500/50 focus:border-yellow-500/50 focus:outline-none"
       >
         {selectedOption ? (
-          <span className="flex items-center justify-between">
+          <span className="flex items-center justify-between gap-2">
             <span className="truncate">{selectedOption.name}</span>
-            <span className="ml-2 text-xs text-yellow-500">#{selectedOption.id}</span>
+            <span className="flex-shrink-0 text-xs text-yellow-500">#{selectedOption.id}</span>
           </span>
         ) : (
-          <span className="text-gray-600">{placeholder}</span>
+          <span className="text-gray-600 text-xs">{placeholder}</span>
         )}
       </button>
 
-      {/* Dropdown */}
       {isOpen && (
         <>
-          {/* Backdrop */}
           <div
             className="fixed inset-0 z-10"
-            onClick={() => {
-              setIsOpen(false);
-              setSearch("");
-            }}
+            onClick={() => { setIsOpen(false); setSearch(""); }}
           />
-
-          {/* Options */}
           <div className="absolute z-20 mt-1 w-full rounded-xl border border-yellow-500/30 bg-black shadow-lg shadow-yellow-500/10">
-            {/* Search input */}
             <div className="border-b border-yellow-500/20 p-2">
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="🔍 Search services..."
-                className="w-full rounded-lg border border-yellow-500/30 bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-yellow-500/50"
+                className="w-full rounded-lg border border-yellow-500/30 bg-gray-900 px-3 py-2 text-xs sm:text-sm text-white placeholder-gray-600 outline-none focus:border-yellow-500/50"
                 autoFocus
               />
             </div>
-
-            {/* Options list */}
-            <div className="max-h-64 overflow-y-auto">
+            <div className="max-h-48 sm:max-h-64 overflow-y-auto">
               {filteredOptions.length === 0 && (
-                <div className="p-4 text-center text-sm text-gray-600">
+                <div className="p-4 text-center text-xs sm:text-sm text-gray-600">
                   No services found
                 </div>
               )}
-
               {filteredOptions.map((option) => (
                 <button
                   key={option.id}
                   type="button"
-                  onClick={() => {
-                    onChange(option.id);
-                    setIsOpen(false);
-                    setSearch("");
-                  }}
-                  className={`w-full px-3 py-2.5 text-left text-sm transition-colors hover:bg-yellow-500/10 ${
-                    value === option.id
-                      ? "bg-yellow-500/20 text-yellow-300"
-                      : "text-gray-300"
+                  onClick={() => { onChange(option.id); setIsOpen(false); setSearch(""); }}
+                  className={`w-full px-3 py-2 text-left text-xs sm:text-sm transition-colors hover:bg-yellow-500/10 ${
+                    value === option.id ? "bg-yellow-500/20 text-yellow-300" : "text-gray-300"
                   }`}
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="truncate">{option.name}</span>
-                    <span className="ml-2 text-xs text-yellow-600">#{option.id}</span>
+                    <span className="flex-shrink-0 text-xs text-yellow-600">#{option.id}</span>
                   </div>
                 </button>
               ))}
             </div>
-
-            {/* Result count */}
             {filteredOptions.length > 0 && (
               <div className="border-t border-yellow-500/20 px-3 py-2 text-xs text-gray-600">
                 {filteredOptions.length} service{filteredOptions.length !== 1 ? "s" : ""} found
@@ -187,9 +166,9 @@ export function BundleManager({ apis, bundles, onAddBundle, onUpdateBundle, onDe
     [apis, apiId]
   );
   const commentOptions = useMemo(
-  () => filterServices(getApiServices(apis, apiId), ["comment", "comments"]),
-  [apis, apiId]
-);
+    () => filterServices(getApiServices(apis, apiId), ["comment", "comments"]),
+    [apis, apiId]
+  );
 
   const resetForm = () => {
     setName("");
@@ -204,25 +183,25 @@ export function BundleManager({ apis, bundles, onAddBundle, onUpdateBundle, onDe
   };
 
   return (
-    <section className="space-y-5">
+    <section className="space-y-4 sm:space-y-5">
+
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-2xl">📁</span>
-          <h2 className="text-2xl font-bold tracking-tight text-yellow-400">Arsenal Bundles</h2>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <span className="text-xl sm:text-2xl">📁</span>
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-yellow-400">
+            Arsenal Bundles
+          </h2>
         </div>
         <button
           type="button"
           onClick={() => {
-            if (showForm) {
-              resetForm();
-              return;
-            }
+            if (showForm) { resetForm(); return; }
             setShowForm(true);
           }}
-          className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 px-4 py-2 text-sm font-medium text-yellow-300 transition hover:bg-yellow-500/20"
+          className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 px-3 py-1.5 text-xs sm:px-4 sm:py-2 sm:text-sm font-medium text-yellow-300 transition hover:bg-yellow-500/20"
         >
-          {showForm ? "Close" : "➕ Create Bundle"}
+          {showForm ? "✕ Close" : "➕ Create"}
         </button>
       </div>
 
@@ -235,14 +214,14 @@ export function BundleManager({ apis, bundles, onAddBundle, onUpdateBundle, onDe
             if (!apiId) return;
             if (!views.trim() || !likes.trim() || !shares.trim() || !saves.trim() || !comments.trim()) return;
             const payload = {
-  name: name.trim(),
-  apiId,
-  views: views.trim(),
-  likes: likes.trim(),
-  shares: shares.trim(),
-  saves: saves.trim(),
-  comments: comments.trim(),
-};
+              name: name.trim(),
+              apiId,
+              views: views.trim(),
+              likes: likes.trim(),
+              shares: shares.trim(),
+              saves: saves.trim(),
+              comments: comments.trim(),
+            };
             if (editingBundleId) {
               onUpdateBundle(editingBundleId, payload);
             } else {
@@ -250,19 +229,25 @@ export function BundleManager({ apis, bundles, onAddBundle, onUpdateBundle, onDe
             }
             resetForm();
           }}
-          className="grid gap-4 rounded-2xl border border-yellow-500/30 bg-gradient-to-br from-gray-900 to-black p-5 md:grid-cols-2"
+          className="space-y-3 rounded-2xl border border-yellow-500/30 bg-gradient-to-br from-gray-900 to-black p-4 sm:p-5"
         >
-          <div className="md:col-span-2">
+          <h3 className="text-xs font-semibold text-yellow-400">
+            {editingBundleId ? "✏️ Edit Bundle" : "➕ New Bundle"}
+          </h3>
+
+          {/* Bundle Name */}
+          <div>
             <label className="mb-1 block text-xs text-gray-500">Bundle Name</label>
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder="e.g., Instagram Growth Package"
-              className="w-full rounded-xl border border-yellow-500/30 bg-black px-3 py-2.5 text-sm text-gray-100 placeholder-gray-600 outline-none focus:border-yellow-500/50"
+              className="w-full rounded-xl border border-yellow-500/30 bg-black px-3 py-2.5 text-xs sm:text-sm text-gray-100 placeholder-gray-600 outline-none focus:border-yellow-500/50"
             />
           </div>
 
-          <div className="md:col-span-2">
+          {/* API Panel */}
+          <div>
             <label className="mb-1 block text-xs text-gray-500">API Panel</label>
             <select
               value={apiId}
@@ -274,7 +259,7 @@ export function BundleManager({ apis, bundles, onAddBundle, onUpdateBundle, onDe
                 setSaves("");
                 setComments("");
               }}
-              className="w-full rounded-xl border border-yellow-500/30 bg-black px-3 py-2.5 text-sm text-gray-100"
+              className="w-full rounded-xl border border-yellow-500/30 bg-black px-3 py-2.5 text-xs sm:text-sm text-gray-100"
             >
               <option value="">Select API Panel</option>
               {apis.map((api) => (
@@ -285,69 +270,70 @@ export function BundleManager({ apis, bundles, onAddBundle, onUpdateBundle, onDe
             </select>
           </div>
 
+          {/* Service Configuration */}
           {apiId && (
             <>
-              <p className="text-xs uppercase tracking-wide text-yellow-500/60 md:col-span-2 flex items-center gap-2">
+              <p className="text-xs uppercase tracking-wide text-yellow-500/60 flex items-center gap-2 pt-1">
                 <span>🎯</span> Service Configuration
               </p>
 
-              {/* 🔍 SEARCHABLE DROPDOWNS */}
-              <SearchableSelect
-                options={viewOptions}
-                value={views}
-                onChange={setViews}
-                placeholder="Select Views Service"
-                label="👁️ Views Service"
-              />
-
-              <SearchableSelect
-                options={likeOptions}
-                value={likes}
-                onChange={setLikes}
-                placeholder="Select Likes Service"
-                label="❤️ Likes Service"
-              />
-
-              <SearchableSelect
-                options={shareOptions}
-                value={shares}
-                onChange={setShares}
-                placeholder="Select Shares Service"
-                label="🔄 Shares Service"
-              />
-
-              <SearchableSelect
-                options={saveOptions}
-                value={saves}
-                onChange={setSaves}
-                placeholder="Select Saves Service"
-                label="💾 Saves Service"
-              />
-              <SearchableSelect
-  options={commentOptions}
-  value={comments}
-  onChange={setComments}
-  placeholder="Select Comments Service"
-  label="💬 Comments Service"
-/>
+              {/* Services Grid - 1 col mobile, 2 col desktop */}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <SearchableSelect
+                  options={viewOptions}
+                  value={views}
+                  onChange={setViews}
+                  placeholder="Select Views Service"
+                  label="👁️ Views Service"
+                />
+                <SearchableSelect
+                  options={likeOptions}
+                  value={likes}
+                  onChange={setLikes}
+                  placeholder="Select Likes Service"
+                  label="❤️ Likes Service"
+                />
+                <SearchableSelect
+                  options={shareOptions}
+                  value={shares}
+                  onChange={setShares}
+                  placeholder="Select Shares Service"
+                  label="🔄 Shares Service"
+                />
+                <SearchableSelect
+                  options={saveOptions}
+                  value={saves}
+                  onChange={setSaves}
+                  placeholder="Select Saves Service"
+                  label="💾 Saves Service"
+                />
+                <SearchableSelect
+                  options={commentOptions}
+                  value={comments}
+                  onChange={setComments}
+                  placeholder="Select Comments Service"
+                  label="💬 Comments Service"
+                />
+              </div>
             </>
           )}
 
+          {/* Submit */}
           <button
             type="submit"
             disabled={!apiId}
-            className="md:col-span-2 rounded-lg border border-yellow-500/50 bg-yellow-500/20 px-3 py-2.5 text-sm font-medium text-yellow-300 transition hover:bg-yellow-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full rounded-lg border border-yellow-500/50 bg-yellow-500/20 px-3 py-2.5 text-xs sm:text-sm font-medium text-yellow-300 transition hover:bg-yellow-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {editingBundleId ? "Update Bundle" : "Save Bundle"}
+            {editingBundleId ? "✓ Update Bundle" : "✓ Save Bundle"}
           </button>
 
           {editingBundleId && (
             <button
               type="button"
               onClick={resetForm}
-              className="md:col-span-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-300 transition hover:bg-gray-700"
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs sm:text-sm text-gray-300 transition hover:bg-gray-700"
             >
-              Cancel Edit
+              ✕ Cancel Edit
             </button>
           )}
         </form>
@@ -364,67 +350,75 @@ export function BundleManager({ apis, bundles, onAddBundle, onUpdateBundle, onDe
         )}
 
         {bundles.map((bundle) => (
-          <article key={bundle.id} className="rounded-2xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-4">
-            <h3 className="text-base font-semibold text-yellow-400">{bundle.name}</h3>
-            <p className="mt-2 text-sm text-gray-500">
-              Panel: <span className="text-gray-300">{apis.find((api) => api.id === bundle.apiId)?.name ?? "Unknown"}</span>
-            </p>
-            
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2">
-                <p className="text-xs text-gray-600">👁️ Views</p>
-                <p className="mt-0.5 text-xs font-mono text-yellow-400">{bundle.serviceIds.views}</p>
+          <article
+            key={bundle.id}
+            className="rounded-2xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-4"
+          >
+            {/* Bundle Header */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm sm:text-base font-semibold text-yellow-400 truncate">
+                  {bundle.name}
+                </h3>
+                <p className="mt-1 text-xs text-gray-500">
+                  Panel:{" "}
+                  <span className="text-gray-300">
+                    {apis.find((api) => api.id === bundle.apiId)?.name ?? "Unknown"}
+                  </span>
+                </p>
               </div>
-              <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2">
-                <p className="text-xs text-gray-600">❤️ Likes</p>
-                <p className="mt-0.5 text-xs font-mono text-yellow-400">{bundle.serviceIds.likes}</p>
+
+              {/* Action Buttons */}
+              <div className="flex flex-shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingBundleId(bundle.id);
+                    setName(bundle.name);
+                    setApiId(bundle.apiId);
+                    setViews(bundle.serviceIds.views);
+                    setLikes(bundle.serviceIds.likes);
+                    setShares(bundle.serviceIds.shares);
+                    setSaves(bundle.serviceIds.saves);
+                    setComments(bundle.serviceIds.comments || "");
+                    setShowForm(true);
+                  }}
+                  className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-2.5 py-1.5 text-xs text-yellow-300 transition hover:bg-yellow-500/20"
+                >
+                  ✏️
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const confirmed = window.confirm("Are you sure you want to delete this bundle?");
+                    if (!confirmed) return;
+                    onDeleteBundle(bundle.id);
+                    if (editingBundleId === bundle.id) resetForm();
+                  }}
+                  className="rounded-md border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-300 transition hover:bg-red-500/20"
+                >
+                  🗑
+                </button>
               </div>
-              <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2">
-                <p className="text-xs text-gray-600">🔄 Shares</p>
-                <p className="mt-0.5 text-xs font-mono text-yellow-400">{bundle.serviceIds.shares}</p>
-              </div>
-              <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2">
-                <p className="text-xs text-gray-600">💾 Saves</p>
-                <p className="mt-0.5 text-xs font-mono text-yellow-400">{bundle.serviceIds.saves}</p>
-              </div>
-              <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2">
-  <p className="text-xs text-gray-600">💬 Comments</p>
-  <p className="mt-0.5 text-xs font-mono text-yellow-400">{bundle.serviceIds.comments}</p>
-</div>
             </div>
 
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingBundleId(bundle.id);
-                  setName(bundle.name);
-                  setApiId(bundle.apiId);
-                  setViews(bundle.serviceIds.views);
-                  setLikes(bundle.serviceIds.likes);
-                  setShares(bundle.serviceIds.shares);
-                  setSaves(bundle.serviceIds.saves);
-                  setComments(bundle.serviceIds.comments || "");
-                  setShowForm(true);
-                }}
-                className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-2.5 py-1.5 text-xs text-yellow-300 transition hover:bg-yellow-500/20"
-              >
-                ✏️ Edit
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const confirmed = window.confirm("Are you sure you want to delete this bundle?");
-                  if (!confirmed) return;
-                  onDeleteBundle(bundle.id);
-                  if (editingBundleId === bundle.id) {
-                    resetForm();
-                  }
-                }}
-                className="rounded-md border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-300 transition hover:bg-red-500/20"
-              >
-                🗑 Delete
-              </button>
+            {/* Service IDs Grid - 2 col mobile, 3 col desktop */}
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {[
+                { label: "👁️ Views", value: bundle.serviceIds.views },
+                { label: "❤️ Likes", value: bundle.serviceIds.likes },
+                { label: "🔄 Shares", value: bundle.serviceIds.shares },
+                { label: "💾 Saves", value: bundle.serviceIds.saves },
+                { label: "💬 Comments", value: bundle.serviceIds.comments },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-2 py-2 sm:px-3"
+                >
+                  <p className="text-[10px] text-gray-600">{item.label}</p>
+                  <p className="mt-0.5 text-xs font-mono text-yellow-400 truncate">{item.value || "—"}</p>
+                </div>
+              ))}
             </div>
           </article>
         ))}
