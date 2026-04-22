@@ -189,6 +189,48 @@ export function DashboardPage({ orders }: DashboardPageProps) {
     window.location.reload();
   };
 
+  // ✅ Export handler
+  const handleExport = () => {
+    const data = {
+      orders: localStorage.getItem("dev-smm-orders"),
+      apis: localStorage.getItem("dev-smm-apis"),
+      bundles: localStorage.getItem("dev-smm-bundles"),
+    };
+    const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `gotham-backup-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // ✅ Import handler
+  const handleImport = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target?.result as string);
+          if (data.orders) localStorage.setItem("dev-smm-orders", data.orders);
+          if (data.apis) localStorage.setItem("dev-smm-apis", data.apis);
+          if (data.bundles) localStorage.setItem("dev-smm-bundles", data.bundles);
+          alert("✅ Data imported! Refreshing...");
+          window.location.reload();
+        } catch {
+          alert("❌ Invalid backup file");
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+
   return (
     <div className="mx-auto max-w-7xl space-y-4 px-3 py-4 sm:px-6 sm:py-7">
 
@@ -232,12 +274,9 @@ export function DashboardPage({ orders }: DashboardPageProps) {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
-        {/* Total Orders */}
         <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-3 sm:p-5">
           <div className="flex items-center justify-between">
-            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-gray-500">
-              Total
-            </p>
+            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-gray-500">Total</p>
             <span className="text-lg sm:text-xl">📦</span>
           </div>
           <p className="mt-2 sm:mt-3 text-2xl sm:text-3xl font-bold text-white">{stats.total}</p>
@@ -249,12 +288,9 @@ export function DashboardPage({ orders }: DashboardPageProps) {
           </p>
         </div>
 
-        {/* Running Orders */}
         <div className="rounded-xl border border-yellow-500/30 bg-gradient-to-br from-yellow-500/10 to-black p-3 sm:p-5">
           <div className="flex items-center justify-between">
-            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-yellow-500">
-              Active
-            </p>
+            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-yellow-500">Active</p>
             <span className="text-lg sm:text-xl">⚡</span>
           </div>
           <p className="mt-2 sm:mt-3 text-2xl sm:text-3xl font-bold text-yellow-400">{stats.running}</p>
@@ -270,36 +306,27 @@ export function DashboardPage({ orders }: DashboardPageProps) {
           </div>
         </div>
 
-        {/* Scheduled Orders */}
         <div className="rounded-xl border border-blue-500/30 bg-gradient-to-br from-blue-500/10 to-black p-3 sm:p-5">
           <div className="flex items-center justify-between">
-            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-blue-500">
-              Scheduled
-            </p>
+            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-blue-500">Scheduled</p>
             <span className="text-lg sm:text-xl">📅</span>
           </div>
           <p className="mt-2 sm:mt-3 text-2xl sm:text-3xl font-bold text-blue-400">{stats.scheduled}</p>
           <p className="mt-1 text-[10px] sm:text-xs text-blue-500/70">Awaiting deploy</p>
         </div>
 
-        {/* Completed Orders */}
         <div className="rounded-xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-black p-3 sm:p-5">
           <div className="flex items-center justify-between">
-            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-emerald-500">
-              Done
-            </p>
+            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-emerald-500">Done</p>
             <span className="text-lg sm:text-xl">✅</span>
           </div>
           <p className="mt-2 sm:mt-3 text-2xl sm:text-3xl font-bold text-emerald-400">{stats.completed}</p>
           <p className="mt-1 text-[10px] sm:text-xs text-emerald-500/70">Accomplished</p>
         </div>
 
-        {/* Failed Orders */}
         <div className="col-span-2 rounded-xl border border-red-500/30 bg-gradient-to-br from-red-500/10 to-black p-3 sm:p-5 lg:col-span-1">
           <div className="flex items-center justify-between">
-            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-red-500">
-              Failed
-            </p>
+            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-wide text-red-500">Failed</p>
             <span className="text-lg sm:text-xl">❌</span>
           </div>
           <p className="mt-2 sm:mt-3 text-2xl sm:text-3xl font-bold text-red-400">{stats.failed}</p>
@@ -335,8 +362,6 @@ export function DashboardPage({ orders }: DashboardPageProps) {
 
       {/* Two Column Layout */}
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
-
-        {/* Orders Chart */}
         <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-4 sm:p-5">
           <h3 className="text-xs sm:text-sm font-medium text-yellow-400">📈 Night Patrol Activity</h3>
           <div className="mt-4 sm:mt-5 flex h-32 sm:h-40 items-end justify-between gap-1 sm:gap-2">
@@ -363,7 +388,6 @@ export function DashboardPage({ orders }: DashboardPageProps) {
           </div>
         </div>
 
-        {/* Services Breakdown */}
         <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-4 sm:p-5">
           <h3 className="text-xs sm:text-sm font-medium text-yellow-400">🦇 Arsenal Breakdown</h3>
           <div className="mt-4 sm:mt-5 space-y-3 sm:space-y-4">
@@ -388,7 +412,6 @@ export function DashboardPage({ orders }: DashboardPageProps) {
                 </div>
               </div>
             ))}
-
             <div className="mt-3 sm:mt-4 rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3 text-center">
               <p className="text-xs text-gray-500">Total Engagements</p>
               <p className="text-lg sm:text-xl font-bold text-yellow-400">
@@ -473,7 +496,37 @@ export function DashboardPage({ orders }: DashboardPageProps) {
         </div>
       </div>
 
-      {/* Clear Orders Button */}
+      {/* ✅ Export / Import Data */}
+      <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 sm:p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-xs sm:text-sm font-medium text-blue-300">💾 Backup & Restore</h3>
+            <p className="mt-1 text-[10px] sm:text-xs text-blue-400/70">
+              Export your data to share across devices or restore from backup.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {/* Export Button */}
+            <button
+              type="button"
+              onClick={handleExport}
+              className="rounded-lg border border-blue-500/50 bg-blue-500/10 px-3 py-2 text-xs sm:text-sm font-medium text-blue-200 transition hover:bg-blue-500/20"
+            >
+              📤 Export Data
+            </button>
+            {/* Import Button */}
+            <button
+              type="button"
+              onClick={handleImport}
+              className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-2 text-xs sm:text-sm font-medium text-emerald-200 transition hover:bg-emerald-500/20"
+            >
+              📥 Import Data
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Clear Orders */}
       <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-4 sm:p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -514,62 +567,7 @@ export function DashboardPage({ orders }: DashboardPageProps) {
           )}
         </div>
       </div>
+
     </div>
   );
 }
-// Add these two buttons in DashboardPage
-// Place them inside the Clear Orders section
-
-{/* Export Button */}
-<button
-  type="button"
-  onClick={() => {
-    const data = {
-      orders: localStorage.getItem('dev-smm-orders'),
-      apis: localStorage.getItem('dev-smm-apis'),
-      bundles: localStorage.getItem('dev-smm-bundles'),
-    };
-    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `gotham-backup-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }}
-  className="rounded-lg border border-blue-500/50 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-200 transition hover:bg-blue-500/20"
->
-  📤 Export Data
-</button>
-
-{/* Import Button */}
-<button
-  type="button"
-  onClick={() => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const data = JSON.parse(ev.target?.result as string);
-          if (data.orders) localStorage.setItem('dev-smm-orders', data.orders);
-          if (data.apis) localStorage.setItem('dev-smm-apis', data.apis);
-          if (data.bundles) localStorage.setItem('dev-smm-bundles', data.bundles);
-          alert('✅ Data imported! Refreshing...');
-          window.location.reload();
-        } catch {
-          alert('❌ Invalid backup file');
-        }
-      };
-      reader.readAsText(file);
-    };
-    input.click();
-  }}
-  className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 transition hover:bg-emerald-500/20"
->
-  📥 Import Data
-</button>
