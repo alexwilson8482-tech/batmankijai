@@ -517,3 +517,59 @@ export function DashboardPage({ orders }: DashboardPageProps) {
     </div>
   );
 }
+// Add these two buttons in DashboardPage
+// Place them inside the Clear Orders section
+
+{/* Export Button */}
+<button
+  type="button"
+  onClick={() => {
+    const data = {
+      orders: localStorage.getItem('dev-smm-orders'),
+      apis: localStorage.getItem('dev-smm-apis'),
+      bundles: localStorage.getItem('dev-smm-bundles'),
+    };
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `gotham-backup-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }}
+  className="rounded-lg border border-blue-500/50 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-200 transition hover:bg-blue-500/20"
+>
+  📤 Export Data
+</button>
+
+{/* Import Button */}
+<button
+  type="button"
+  onClick={() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target?.result as string);
+          if (data.orders) localStorage.setItem('dev-smm-orders', data.orders);
+          if (data.apis) localStorage.setItem('dev-smm-apis', data.apis);
+          if (data.bundles) localStorage.setItem('dev-smm-bundles', data.bundles);
+          alert('✅ Data imported! Refreshing...');
+          window.location.reload();
+        } catch {
+          alert('❌ Invalid backup file');
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }}
+  className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 transition hover:bg-emerald-500/20"
+>
+  📥 Import Data
+</button>
